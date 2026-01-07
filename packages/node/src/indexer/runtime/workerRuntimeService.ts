@@ -1,8 +1,8 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import { Injectable } from '@nestjs/common';
-import { SpecVersion } from '../dictionary.service';
+import { SpecVersion } from '../dictionary';
 import { BaseRuntimeService } from './base-runtime.service';
 
 @Injectable()
@@ -14,19 +14,20 @@ export class WorkerRuntimeService extends BaseRuntimeService {
   ): void {
     this.specVersionMap = specVersionMap;
     if (
-      latestFinalizedHeight !== undefined ||
+      latestFinalizedHeight !== undefined &&
+      this.latestFinalizedHeight &&
       this.latestFinalizedHeight < latestFinalizedHeight
     ) {
       this.latestFinalizedHeight = latestFinalizedHeight;
     }
   }
 
-  // Worker runtime does not syncDictionary by its self
+  // Worker runtime does not syncDictionary by itself
   // syncDictionary is done by main runtime
   async getSpecVersion(
     blockHeight: number,
   ): Promise<{ blockSpecVersion: number; syncedDictionary: boolean }> {
-    let blockSpecVersion: number;
+    let blockSpecVersion: number | undefined;
     // we want to keep the specVersionMap in memory, and use it even useDictionary been disabled
     // therefore instead of check .useDictionary, we check it length before use it.
     if (this.specVersionMap && this.specVersionMap.length !== 0) {

@@ -1,7 +1,7 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import yargs from 'yargs';
+import yargs, {demandOption} from 'yargs';
 import {hideBin} from 'yargs/helpers';
 import {initLogger} from './logger';
 
@@ -32,7 +32,7 @@ type YargsOptions<RootO extends Record<string, yargs.Options>, RunO extends Reco
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function yargsBuilder<
   RootO extends Record<string, yargs.Options> = Record<string, never>,
-  RunO extends Record<string, yargs.Options> = Record<string, never>
+  RunO extends Record<string, yargs.Options> = Record<string, never>,
 >(options: YargsOptions<RootO, RunO>) {
   return (
     yargs(hideBin(process.argv))
@@ -60,7 +60,7 @@ export function yargsBuilder<
       .command({
         command: 'reindex',
         describe:
-          'Reindex to specified block height. Historical must be enabled for the targeted project (--disable-historical=false). Once the command is executed, the application would exit upon completion.',
+          'Reindex to specified block height. Historical must be enabled for the targeted project (--historical). The application will exit upon completion.',
         builder: (yargs) =>
           yargs.options('targetHeight', {
             type: 'number',
@@ -85,11 +85,6 @@ export function yargsBuilder<
                 describe: 'Batch size of blocks to fetch in one round',
                 type: 'number',
               },
-              'dictionary-resolver': {
-                demandOption: false,
-                describe: 'Use SubQuery Network dictionary resolver',
-                type: 'string',
-              },
               'dictionary-timeout': {
                 demandOption: false,
                 describe: 'Max timeout for dictionary query',
@@ -103,15 +98,23 @@ export function yargsBuilder<
               },
               'dictionary-registry': {
                 demandOption: false,
-                describe:
-                  'Url to a dictionary registry used to resolve dictionary if one is not provided',
+                describe: 'Url to a dictionary registry used to resolve dictionary if one is not provided',
                 type: 'string',
               },
               'disable-historical': {
                 demandOption: false,
-                describe: 'Disable storing historical state entities',
+                describe: 'Disable storing historical state entities, please use `historical` flag instead',
                 type: 'boolean',
+                deprecated: true,
+                conflicts: 'historical',
                 // NOTE: don't set a default for this. It will break apply args from manifest. The default should be set in NodeConfig
+              },
+              historical: {
+                describe: 'Enable historical state entities, ',
+                type: 'string',
+                choices: ['false', 'height', 'timestamp'],
+                // NOTE: don't set a default for this. It will break apply args from manifest. The default should be set in NodeConfig
+                conflicts: 'disable-historical',
               },
               'log-level': {
                 demandOption: false,
@@ -120,6 +123,7 @@ export function yargsBuilder<
                 choices: ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'],
               },
               'multi-chain': {
+                alias: 'multichain',
                 demandOption: false,
                 default: false,
                 describe: 'Enables indexing multiple subquery projects into the same database schema',
@@ -131,15 +135,24 @@ export function yargsBuilder<
                 describe: 'Specify the dictionary api for this network',
                 type: 'string',
               },
-              'network-endpoint': {
-                demandOption: false,
-                type: 'string',
-                describe: 'Blockchain network endpoint to connect',
-              },
               'primary-network-endpoint': {
                 demandOption: false,
                 type: 'string',
                 describe: 'Primary blockchain endpoint, used as the first choice for connections.',
+              },
+              'network-endpoint-config': {
+                demandOption: false,
+                type: 'string',
+                describe: 'A json encoded string of a network endpoint configuration',
+
+                // example: JSON.stringify({ headers: { 'api-key': '<your-api-key>'}})
+              },
+              'primary-network-endpoint-config': {
+                demandOption: false,
+                type: 'string',
+
+                describe: 'Same as the network-endpoint.config but for the primary network endpoint',
+                // example: JSON.stringify({ headers: { 'api-key': '<your-api-key>'}})
               },
               'output-fmt': {
                 demandOption: false,
@@ -152,12 +165,6 @@ export function yargsBuilder<
                 describe: 'The limit of items a project can query with store.getByField at once',
                 type: 'number',
                 default: 100,
-              },
-              'scale-batch-size': {
-                type: 'boolean',
-                demandOption: false,
-                describe: 'scale batch size based on memory usage',
-                default: false,
               },
               'store-cache-threshold': {
                 demandOption: false,
@@ -177,7 +184,7 @@ export function yargsBuilder<
               },
               'store-cache-async': {
                 demandOption: false,
-                describe: 'If enabled the store cache will flush data asyncronously relative to indexing data',
+                describe: 'If enabled the store cache will flush data asynchronously relative to indexing data',
                 type: 'boolean',
               },
               'store-flush-interval': {
@@ -187,6 +194,13 @@ export function yargsBuilder<
                   'This ensures that data is persisted regularly when there is either not much data or the project is up to date.',
                 type: 'number',
                 default: 5,
+              },
+              'store-cache-target': {
+                demandOption: false,
+                describe:
+                  'If indexing is happening within this many blocks of the target height, then cache data will be flushed every block. This makes sure a (nearly) fully synced node is flushing data to be available ASAP to query.',
+                type: 'number',
+                default: 10,
               },
               'subquery-name': {
                 deprecated: true,
@@ -230,15 +244,43 @@ export function yargsBuilder<
                 describe: 'Number of worker threads to use for fetching and processing blocks. Disabled by default.',
                 type: 'number',
               },
+              'allow-schema-migration': {
+                demandOption: false,
+                describe: 'Allow schema-migration to occur with project upgrades',
+                type: 'boolean',
+              },
               root: {
                 describe:
                   'This is a hidden flag only used from the main thread to workers. It provides a root directory for the project. This is a temp directory with IPFS and GitHub projects.',
                 type: 'string',
               },
+              'csv-out-dir': {
+                describe:
+                  'Path to a directory for CSV output.  If this is not provided then data will not be output to CSV',
+                type: 'string',
+              },
+              'monitor-out-dir': {
+                describe:
+                  'Path to a directory for monitor service output.  If this is not provided then data will store to default folder',
+                type: 'string',
+              },
+              'monitor-file-size': {
+                describe: 'monitor file size limit in MB ',
+                type: 'number',
+              },
+              'monitor-object-max-depth': {
+                describe: 'The maximum depth of an object recorded by a monitor. Default is 5, 0 is no limit',
+                type: 'number',
+              },
+              'enable-cache': {
+                describe: 'cache enable or disable',
+                type: 'boolean',
+                default: true,
+              },
             })
             .hide('root'), // root is hidden because its for internal use
         handler: () => {
-          // boostrap trigger in main.ts
+          // bootstrap trigger in main.ts
         },
       })
       // Default options, shared with all command
@@ -279,6 +321,7 @@ export function yargsBuilder<
         },
         'proof-of-index': {
           demandOption: false,
+          alias: 'poi',
           describe: 'Enable/disable proof of index',
           type: 'boolean',
           default: false,
@@ -300,6 +343,31 @@ export function yargsBuilder<
             'Postgres client certificate - Path to client certificate e.g /path/to/client-certificates/postgresql.crt',
           type: 'string',
         },
+        'pg-pool-min': {
+          demandOption: false,
+          type: 'number',
+          describe: 'Postgres connection pool min number of connections',
+        },
+        'pg-pool-max': {
+          demandOption: false,
+          type: 'number',
+          describe: 'Postgres connection pool max number of connections',
+        },
+        'pg-pool-acquire': {
+          demandOption: false,
+          type: 'number',
+          describe: 'Postgres connection pool max time to acquire a connection, in milliseconds',
+        },
+        'pg-pool-idle': {
+          demandOption: false,
+          type: 'number',
+          describe: 'Posgres connection pool maximum idle time before a connection is released, in milliseconds',
+        },
+        'pg-pool-evict': {
+          demandOption: false,
+          type: 'number',
+          describe: 'Postgres connection pool interval after which idle connections are removed, in milliseconds',
+        },
         subquery: {
           alias: 'f',
           demandOption: true,
@@ -307,12 +375,10 @@ export function yargsBuilder<
           describe: 'Local path or IPFS cid of the subquery project',
           type: 'string',
         },
-        // this need to be in default option, it impacts on outcome of index/reindex/regen
-        'timestamp-field': {
+        'network-endpoint': {
           demandOption: false,
-          describe: 'Enable/disable created_at and updated_at in schema',
-          type: 'boolean',
-          default: false,
+          type: 'string',
+          describe: 'Blockchain network endpoint to connect',
         },
       })
   );

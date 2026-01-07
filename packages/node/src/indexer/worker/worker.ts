@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 // initlogger and yargs must be imported before all other imports
@@ -25,15 +25,15 @@ import {
   initWorkerServices,
   getWorkerService,
   IBaseIndexerWorker,
+  ProjectService,
 } from '@subql/node-core';
-import { SpecVersion } from '../dictionary.service';
-import { ProjectService } from '../project.service';
+import { SpecVersion } from '../dictionary';
 import { WorkerModule } from './worker.module';
 import { WorkerService } from './worker.service';
 
 const logger = getLogger(`worker #${threadId}`);
 
-async function initWorker(startHeight: number): Promise<void> {
+async function initWorker(startHeight?: number): Promise<void> {
   try {
     const app = await NestFactory.create(WorkerModule, {
       logger: new NestLogger(!!argv.debug), // TIP: If the worker is crashing comment out this line for better logging
@@ -44,11 +44,10 @@ async function initWorker(startHeight: number): Promise<void> {
     const projectService: ProjectService = app.get('IProjectService');
     // Initialise async services, we do this here rather than in factories so we can capture one off events
     await projectService.init(startHeight);
-
     const workerService = app.get(WorkerService);
 
     initWorkerServices(app, workerService);
-  } catch (e) {
+  } catch (e: any) {
     console.log('Failed to start worker', e);
     logger.error(e, 'Failed to start worker');
     throw e;

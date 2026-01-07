@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {assignWith, camelCase, isUndefined} from 'lodash';
@@ -34,4 +34,12 @@ export function splitArrayByRatio(arr: number[], weights: number[]): number[][] 
 
 export function hasValue<T>(obj: T | undefined | null): obj is T {
   return obj !== undefined && obj !== null;
+}
+
+export function customCamelCaseGraphqlKey(str: string) {
+  return str
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 }

@@ -1,86 +1,59 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'assert';
 import {Inject, Injectable} from '@nestjs/common';
-import {getDbType, SUPPORT_DB} from '@subql/common';
 import {IProjectNetworkConfig} from '@subql/types-core';
 import {
   GraphQLModelsRelationsEnums,
-  GraphQLModelsType,
-  GraphQLRelationsType,
   hashName,
-  IndexType,
   METADATA_REGEX,
   MULTI_METADATA_REGEX,
   hexToU8a,
-  blake2AsHex,
+  GraphQLModelsType,
 } from '@subql/utils';
 import {
-  DataTypes,
   IndexesOptions,
-  Model,
-  ModelAttributeColumnOptions,
   ModelAttributes,
   ModelStatic,
   Op,
   QueryTypes,
   Sequelize,
   Transaction,
-  Utils,
+  Deferrable,
 } from '@subql/x-sequelize';
-import {camelCase, flatten, isEqual, upperFirst} from 'lodash';
+import {camelCase, flatten, last, upperFirst} from 'lodash';
 import {NodeConfig} from '../configure';
-import {getLogger} from '../logger';
 import {
-  addTagsToForeignKeyMap,
   BTREE_GIST_EXTENSION_EXIST_QUERY,
-  camelCaseObjectKey,
-  commentConstraintQuery,
-  commentTableQuery,
-  constraintDeferrableQuery,
-  createNotifyTrigger,
   createSchemaTrigger,
   createSchemaTriggerFunction,
-  createSendNotificationTriggerFunction,
-  createUniqueIndexQuery,
-  dropNotifyFunction,
-  dropNotifyTrigger,
-  enumNameToHash,
-  getEnumDeprecated,
-  getExistedIndexesQuery,
-  getFkConstraint,
+  getDbSizeAndUpdateMetadata,
   getTriggers,
-  getVirtualFkTag,
-  modelsTypeToModelAttributes,
-  SmartTags,
-  smartTags,
-} from '../utils';
-import {generateIndexName, modelToTableName} from '../utils/sequelizeUtil';
-import {MetadataFactory, MetadataRepo, PoiFactory, PoiFactoryDeprecate, PoiRepo} from './entities';
+  ModifiedDbModels,
+  SchemaMigrationService,
+  tableExistsQuery,
+} from '../db';
+import {getLogger} from '../logger';
+import {exitWithError} from '../process';
+import {customCamelCaseGraphqlKey, getHistoricalUnit} from '../utils';
+import {
+  GlobalDataFactory,
+  GlobalDataRepo,
+  MetadataFactory,
+  MetadataRepo,
+  PoiFactory,
+  PoiFactoryDeprecate,
+  PoiRepo,
+} from './entities';
 import {Store} from './store';
-import {CacheMetadataModel} from './storeCache';
-import {StoreCacheService} from './storeCache/storeCache.service';
+import {IMetadata, IStoreModelProvider, PlainStoreModelService} from './storeModelProvider';
 import {StoreOperations} from './StoreOperations';
-import {ISubqueryProject} from './types';
+import {Header, HistoricalMode, ISubqueryProject} from './types';
 
 const logger = getLogger('StoreService');
 const NULL_MERKEL_ROOT = hexToU8a('0x00');
-const NotifyTriggerManipulationType = [`INSERT`, `DELETE`, `UPDATE`];
-
-type RemovedIndexes = Record<string, IndexesOptions[]>;
-
-interface IndexField {
-  entityName: string;
-  fieldName: string;
-  isUnique: boolean;
-  type: string;
-}
-
-interface NotifyTriggerPayload {
-  triggerName: string;
-  eventManipulation: string;
-}
+const DB_SIZE_CACHE_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 
 class NoInitError extends Error {
   constructor() {
@@ -91,29 +64,26 @@ class NoInitError extends Error {
 @Injectable()
 export class StoreService {
   poiRepo?: PoiRepo;
-  private removedIndexes: RemovedIndexes = {};
-  private _modelIndexedFields?: IndexField[];
   private _modelsRelations?: GraphQLModelsRelationsEnums;
+  private _globalDataRepo?: GlobalDataRepo;
   private _metaDataRepo?: MetadataRepo;
-  private _historical?: boolean;
-  private _dbType?: SUPPORT_DB;
-  private _metadataModel?: CacheMetadataModel;
-
+  private _historical?: HistoricalMode;
+  private _metadataModel?: IMetadata;
+  private _schema?: string;
+  private _isMultichain?: boolean;
   // Should be updated each block
-  private _blockHeight?: number;
+  private _blockHeader?: Header;
   private _operationStack?: StoreOperations;
+  private _lastTimeDbSizeChecked?: number;
+
+  #transaction?: Transaction;
 
   constructor(
     private sequelize: Sequelize,
     private config: NodeConfig,
-    readonly storeCache: StoreCacheService,
+    @Inject('IStoreModelProvider') readonly modelProvider: IStoreModelProvider,
     @Inject('ISubqueryProject') private subqueryProject: ISubqueryProject<IProjectNetworkConfig>
   ) {}
-
-  private get modelIndexedFields(): IndexField[] {
-    assert(this._modelIndexedFields, new NoInitError());
-    return this._modelIndexedFields;
-  }
 
   private get modelsRelations(): GraphQLModelsRelationsEnums {
     assert(this._modelsRelations, new NoInitError());
@@ -133,24 +103,54 @@ export class StoreService {
     return this._operationStack;
   }
 
-  get blockHeight(): number {
-    assert(this._blockHeight, new Error('StoreService.setBlockHeight has not been called'));
-    return this._blockHeight;
+  get globalDataRepo(): GlobalDataRepo {
+    assert(this._globalDataRepo, new NoInitError());
+    return this._globalDataRepo;
   }
 
-  get historical(): boolean {
+  get blockHeader(): Header {
+    assert(this._blockHeader, new Error('StoreService.setBlockHeader has not been called'));
+    return this._blockHeader;
+  }
+
+  get historical(): HistoricalMode {
     assert(this._historical !== undefined, new NoInitError());
     return this._historical;
   }
 
-  private get dbType(): SUPPORT_DB {
-    assert(this._dbType, new NoInitError());
-    return this._dbType;
+  get transaction(): Transaction | undefined {
+    return this.#transaction;
   }
 
-  private get metadataModel(): CacheMetadataModel {
+  get isMultichain(): boolean {
+    assert(this._isMultichain !== undefined, new NoInitError());
+    return this._isMultichain;
+  }
+
+  async syncDbSize(): Promise<bigint> {
+    if (!this._lastTimeDbSizeChecked || Date.now() - this._lastTimeDbSizeChecked > DB_SIZE_CACHE_TIMEOUT) {
+      this._lastTimeDbSizeChecked = Date.now();
+      return getDbSizeAndUpdateMetadata(this.sequelize, this.schema);
+    } else {
+      return this.modelProvider.metadata.find('dbSize').then((cachedDbSize) => {
+        if (cachedDbSize !== undefined) {
+          return cachedDbSize;
+        } else {
+          this._lastTimeDbSizeChecked = Date.now();
+          return getDbSizeAndUpdateMetadata(this.sequelize, this.schema);
+        }
+      });
+    }
+  }
+
+  private get metadataModel(): IMetadata {
     assert(this._metadataModel, new NoInitError());
     return this._metadataModel;
+  }
+
+  private get schema(): string {
+    assert(this._schema, new NoInitError());
+    return this._schema;
   }
 
   // Initialize tables and data that isnt' specific to the users data
@@ -160,55 +160,68 @@ export class StoreService {
       this.poiRepo = usePoiFactory(this.sequelize, schema);
     }
 
+    this._schema = schema;
+
+    await this.setMultiChainProject();
+
     this._metaDataRepo = await MetadataFactory(
       this.sequelize,
       schema,
-      this.config.multiChain,
+      this.isMultichain,
       this.subqueryProject.network.chainId
     );
 
-    this._dbType = await getDbType(this.sequelize);
+    if (this.isMultichain) {
+      this._globalDataRepo = GlobalDataFactory(this.sequelize, schema);
+    }
 
     await this.sequelize.sync();
 
     this._historical = await this.getHistoricalStateEnabled(schema);
-    if (this.historical && this.dbType === SUPPORT_DB.cockRoach) {
-      this._historical = false;
-      logger.warn(`Historical feature is not supported with ${this.dbType}`);
-    }
-    logger.info(`Historical state is ${this.historical ? 'enabled' : 'disabled'}`);
+    logger.info(`Historical state is ${this.historical || 'disabled'}`);
 
-    this.storeCache.init(this.historical, this.dbType === SUPPORT_DB.cockRoach, this.metaDataRepo, this.poiRepo);
+    this.modelProvider.init(this.historical, this.metaDataRepo, this.poiRepo);
 
-    this._metadataModel = this.storeCache.metadata;
+    this._metadataModel = this.modelProvider.metadata;
 
-    this.metadataModel.set('historicalStateEnabled', this.historical);
-    this.metadataModel.setIncrement('schemaMigrationCount');
+    await this.initHotSchemaReloadQueries(schema);
+
+    await this.metadataModel.set('historicalStateEnabled', this.historical);
   }
 
-  async init(modelsRelations: GraphQLModelsRelationsEnums, schema: string): Promise<void> {
-    this._modelsRelations = modelsRelations;
+  async init(schema: string, tx: Transaction): Promise<void> {
+    try {
+      if (this.historical) {
+        const [results] = await this.sequelize.query(BTREE_GIST_EXTENSION_EXIST_QUERY);
+        if (results.length === 0) {
+          throw new Error('Btree_gist extension is required to enable historical data, contact DB admin for support');
+        }
+      }
+      /*
+      On SyncSchema, if no schema migration is introduced, it would consider current schema to be null, and go all db operations again
+      every start up is a migration
+       */
+      const schemaMigrationService = new SchemaMigrationService(this.sequelize, this, schema, this.config);
 
-    try {
-      await this.syncSchema(schema, this.config.subscription);
+      await schemaMigrationService.run(null, this.subqueryProject.schema, tx);
+
+      const deploymentsRaw = await this.metadataModel.find('deployments');
+      const deployments = deploymentsRaw ? JSON.parse(deploymentsRaw) : {};
+
+      // Check if the deployment change or a local project is running
+      // WARNING:This assumes that the root is the same as the id for local project, there are no checks for this and it could change at any time
+      if (
+        this.subqueryProject.id === this.subqueryProject.root ||
+        last(Object.values(deployments)) !== this.subqueryProject.id
+      ) {
+        await this.metadataModel.setIncrement('schemaMigrationCount', undefined, tx);
+      }
     } catch (e: any) {
-      logger.error(e, `Having a problem when syncing schema`);
-      process.exit(1);
-    }
-    try {
-      this._modelIndexedFields = await this.getAllIndexFields(schema);
-    } catch (e: any) {
-      logger.error(e, `Having a problem when get indexed fields`);
-      process.exit(1);
+      exitWithError(new Error(`Having a problem when syncing schema`, {cause: e}), logger);
     }
   }
 
-  async initHotSchemaReloadQueries(schema: string): Promise<void> {
-    if (this.dbType === SUPPORT_DB.cockRoach) {
-      logger.warn(`Hot schema reload feature is not supported with ${this.dbType}`);
-      return;
-    }
-
+  private async initHotSchemaReloadQueries(schema: string): Promise<void> {
     /* These SQL queries are to allow hot-schema reload on query service */
     const schemaTriggerName = hashName(schema, 'schema_trigger', this.metaDataRepo.tableName);
     const schemaTriggers = await getTriggers(this.sequelize, schemaTriggerName);
@@ -228,205 +241,56 @@ export class StoreService {
     }
   }
 
-  // eslint-disable-next-line complexity
-  async syncSchema(schema: string, useSubscription: boolean): Promise<void> {
-    if (useSubscription && this.dbType === SUPPORT_DB.cockRoach) {
-      useSubscription = false;
-      logger.warn(`Subscription is not support with ${this.dbType}`);
-    }
+  // Updates the state of the store and model provider after migrations occurr
+  updateModels(modelChanges: ModifiedDbModels, modelsRelations: GraphQLModelsRelationsEnums): undefined {
+    this.modelProvider.updateModels(modelChanges);
+    this._modelsRelations = modelsRelations;
+  }
 
-    const enumTypeMap = new Map<string, string>();
-    if (this.historical) {
-      const [results] = await this.sequelize.query(BTREE_GIST_EXTENSION_EXIST_QUERY);
-      if (results.length === 0) {
-        throw new Error('Btree_gist extension is required to enable historical data, contact DB admin for support');
-      }
-    }
-
-    const [indexesResult] = await this.sequelize.query(getExistedIndexesQuery(schema));
-    const existedIndexes = indexesResult.map((i) => (i as any).indexname);
-
-    for (const e of this.modelsRelations.enums) {
-      // We shouldn't set the typename to e.name because it could potentially create SQL injection,
-      // using a replacement at the type name location doesn't work.
-      const enumTypeName = enumNameToHash(e.name);
-      let type = `"${schema}"."${enumTypeName}"`;
-      let [results] = await this.sequelize.query(
-        `SELECT pg_enum.enumlabel as enum_value
-         FROM pg_type t JOIN pg_enum ON pg_enum.enumtypid = t.oid JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
-         WHERE t.typname = ? AND n.nspname = ? order by enumsortorder;`,
-        {replacements: [enumTypeName, schema]}
-      );
-
-      const enumTypeNameDeprecated = `${schema}_enum_${enumNameToHash(e.name)}`;
-      const resultsDeprecated = await getEnumDeprecated(this.sequelize, enumTypeNameDeprecated);
-      if (resultsDeprecated.length !== 0) {
-        results = resultsDeprecated;
-        type = `"${enumTypeNameDeprecated}"`;
-      }
-
-      if (results.length === 0) {
-        await this.sequelize.query(`CREATE TYPE ${type} as ENUM (${e.values.map(() => '?').join(',')});`, {
-          replacements: e.values,
-        });
-      } else {
-        const currentValues = results.map((v: any) => v.enum_value);
-        // Assert the existing enum is same
-
-        // Make it a function to not execute potentially big joins unless needed
-        if (!isEqual(e.values, currentValues)) {
-          throw new Error(
-            `\n * Can't modify enum "${e.name}" between runs: \n * Before: [${currentValues.join(
-              `,`
-            )}] \n * After : [${e.values.join(',')}] \n * You must rerun the project to do such a change`
-          );
-        }
-      }
-      // Ref: https://www.graphile.org/postgraphile/enums/
-      // Example query for enum name: COMMENT ON TYPE "polkadot-starter_enum_a40fe73329" IS E'@enum\n@enumName TestEnum'
-      // It is difficult for sequelize use replacement, instead we use escape to avoid injection
-      // UPDATE: this comment got syntax error with cockroach db, disable it for now. Waiting to be fixed.
-      // See https://github.com/cockroachdb/cockroach/issues/44135
-
-      if (this.dbType === SUPPORT_DB.cockRoach) {
-        logger.warn(
-          `Comment on enum ${e.description} is not supported with ${this.dbType}, enum name may display incorrectly in query service`
-        );
-      } else {
-        const comment = this.sequelize.escape(
-          `@enum\\n@enumName ${e.name}${e.description ? `\\n ${e.description}` : ''}`
-        );
-        await this.sequelize.query(`COMMENT ON TYPE ${type} IS E${comment}`);
-      }
-      enumTypeMap.set(e.name, type);
-    }
-    const extraQueries = [];
-    // Function need to create ahead of triggers
-    if (useSubscription) {
-      extraQueries.push(createSendNotificationTriggerFunction(schema));
-    }
-    for (const model of this.modelsRelations.models) {
-      const attributes = modelsTypeToModelAttributes(model, enumTypeMap);
-      const indexes = model.indexes.map(({fields, unique, using}) => ({
-        fields: fields.map((field) => Utils.underscoredIf(field, true)),
-        unique,
-        using,
-      }));
-      if (indexes.length > this.config.indexCountLimit) {
-        throw new Error(`too many indexes on entity ${model.name}`);
-      }
-      if (this.historical) {
-        this.addIdAndBlockRangeAttributes(attributes);
-        this.addBlockRangeColumnToIndexes(indexes);
-        this.addHistoricalIdIndex(model, indexes);
-      }
-      // Hash indexes name to ensure within postgres limit
-      // Also check with existed indexes for previous logic, if existed index is valid then ignore it.
-      // only update index name as it is new index or not found (it is might be an over length index name)
-      this.updateIndexesName(model.name, indexes, existedIndexes as string[]);
-
-      // Update index query for cockroach db
-      this.beforeHandleCockroachIndex(schema, model.name, indexes, existedIndexes as string[], extraQueries);
-
-      const sequelizeModel = this.sequelize.define(model.name, attributes, {
-        underscored: true,
-        comment: model.description,
-        freezeTableName: false,
-        createdAt: this.config.timestampField,
-        updatedAt: this.config.timestampField,
-        schema,
-        indexes,
-      });
-
-      if (this.historical) {
-        this.addScopeAndBlockHeightHooks(sequelizeModel);
-        // TODO, remove id and block_range constrain, check id manually
-        // see https://github.com/subquery/subql/issues/1542
-      }
-
-      if (useSubscription) {
-        const triggerName = hashName(schema, 'notify_trigger', sequelizeModel.tableName);
-        const notifyTriggers = await getTriggers(this.sequelize, triggerName);
-        // Triggers not been found
-        if (notifyTriggers.length === 0) {
-          extraQueries.push(createNotifyTrigger(schema, sequelizeModel.tableName));
-        } else {
-          this.validateNotifyTriggers(triggerName, notifyTriggers as NotifyTriggerPayload[]);
-        }
-      } else {
-        //TODO: DROP TRIGGER IF EXIST is not valid syntax for cockroach, better check trigger exist at first.
-        if (this.dbType !== SUPPORT_DB.cockRoach) {
-          extraQueries.push(dropNotifyTrigger(schema, sequelizeModel.tableName));
-        }
-      }
-    }
-    // We have to drop the function after all triggers depend on it are removed
-    if (!useSubscription && this.dbType !== SUPPORT_DB.cockRoach) {
-      extraQueries.push(dropNotifyFunction(schema));
-    }
-
-    const foreignKeyMap = new Map<string, Map<string, SmartTags>>();
-    for (const relation of this.modelsRelations.relations) {
-      const model = this.sequelize.model(relation.from);
-      const relatedModel = this.sequelize.model(relation.to);
-      if (this.historical) {
-        this.addRelationToMap(relation, foreignKeyMap, model, relatedModel);
-        continue;
-      }
-      switch (relation.type) {
-        case 'belongsTo': {
-          const rel = model.belongsTo(relatedModel, {foreignKey: relation.foreignKey});
-          const fkConstraint = getFkConstraint(rel.source.tableName, rel.foreignKey);
-          if (this.dbType !== SUPPORT_DB.cockRoach) {
-            extraQueries.push(constraintDeferrableQuery(model.getTableName().toString(), fkConstraint));
-          }
-          break;
-        }
-        case 'hasOne': {
-          const rel = model.hasOne(relatedModel, {
-            foreignKey: relation.foreignKey,
-          });
-          const fkConstraint = getFkConstraint(rel.target.tableName, rel.foreignKey);
-          const tags = smartTags({
-            singleForeignFieldName: relation.fieldName,
-          });
-          extraQueries.push(
-            commentConstraintQuery(`"${schema}"."${rel.target.tableName}"`, fkConstraint, tags),
-            createUniqueIndexQuery(schema, relatedModel.tableName, relation.foreignKey)
-          );
-          break;
-        }
-        case 'hasMany': {
-          const rel = model.hasMany(relatedModel, {
-            foreignKey: relation.foreignKey,
-          });
-          const fkConstraint = getFkConstraint(rel.target.tableName, rel.foreignKey);
-          const tags = smartTags({
-            foreignFieldName: relation.fieldName,
-          });
-          extraQueries.push(commentConstraintQuery(`"${schema}"."${rel.target.tableName}"`, fkConstraint, tags));
-
-          break;
-        }
-        default:
-          throw new Error('Relation type is not supported');
-      }
-    }
-    foreignKeyMap.forEach((keys, tableName) => {
-      const comment = Array.from(keys.values())
-        .map((tags) => smartTags(tags, '|'))
-        .join('\n');
-      const query = commentTableQuery(`"${schema}"."${tableName}"`, comment);
-      extraQueries.push(query);
+  defineModel(
+    model: GraphQLModelsType,
+    attributes: ModelAttributes<any>,
+    indexes: IndexesOptions[],
+    schema: string
+  ): ModelStatic<any> {
+    const sequelizeModel = this.sequelize.define(model.name, attributes, {
+      underscored: true,
+      comment: model.description,
+      freezeTableName: false,
+      timestamps: false,
+      schema,
+      indexes,
     });
 
-    await this.sequelize.sync();
+    if (this.historical) {
+      // WARNING these hooks depend on `this.blockHeight` which is a changing value. DO NOT move this into a function outside of this class
+      sequelizeModel.addScope('defaultScope', {
+        attributes: {
+          exclude: ['__id', '__block_range'],
+        },
+      });
 
-    for (const query of extraQueries) {
-      await this.sequelize.query(query);
+      sequelizeModel.addHook('beforeFind', (options) => {
+        (options.where as any).__block_range = {
+          [Op.contains]: this.getHistoricalUnit(),
+        };
+      });
+      sequelizeModel.addHook('beforeValidate', (attributes, options) => {
+        attributes.__block_range = [this.getHistoricalUnit(), null];
+      });
+
+      if (!this.config.enableCache) {
+        sequelizeModel.addHook('beforeBulkCreate', (instances, options) => {
+          instances.forEach((item) => {
+            item.__block_range = [this.getHistoricalUnit(), null];
+          });
+        });
+      }
+      // TODO, remove id and block_range constraint, check id manually
+      // see https://github.com/subquery/subql/issues/1542
     }
 
-    this.afterHandleCockroachIndex();
+    return sequelizeModel;
   }
 
   private async useDeprecatePoi(schema: string): Promise<boolean> {
@@ -435,220 +299,68 @@ export class StoreService {
     return !!result.length;
   }
 
-  async getHistoricalStateEnabled(schema: string): Promise<boolean> {
-    const {disableHistorical, multiChain} = this.config;
+  async getHistoricalStateEnabled(schema: string): Promise<HistoricalMode> {
+    const {historical, multiChain} = this.config;
 
     try {
-      const tableRes = await this.sequelize.query<Array<string>>(
-        `SELECT table_name FROM information_schema.tables where table_schema='${schema}'`,
-        {type: QueryTypes.SELECT}
-      );
+      const tableRes = await this.sequelize.query<Array<string>>(tableExistsQuery(schema), {type: QueryTypes.SELECT});
 
       const metadataTableNames = flatten(tableRes).filter(
         (value: string) => METADATA_REGEX.test(value) || MULTI_METADATA_REGEX.test(value)
       );
 
-      if (metadataTableNames.length > 1 && !multiChain) {
-        logger.error(
-          'There are multiple projects in the database schema, if you are trying to multi-chain index use --multi-chain'
-        );
-        process.exit(1);
+      if (metadataTableNames.length <= 0) {
+        throw new Error('Metadata table does not exist');
       }
 
-      if (metadataTableNames.length === 1) {
-        const res = await this.sequelize.query<{key: string; value: boolean | string}>(
-          `SELECT key, value FROM "${schema}"."${metadataTableNames[0]}" WHERE (key = 'historicalStateEnabled' OR key = 'genesisHash')`,
-          {type: QueryTypes.SELECT}
-        );
-
-        const store = res.reduce(function (total, current) {
-          total[current.key] = current.value;
-          return total;
-        }, {} as {[key: string]: string | boolean});
-
-        const useHistorical =
-          store.historicalStateEnabled === undefined ? !disableHistorical : (store.historicalStateEnabled as boolean);
-
-        if (useHistorical && multiChain) {
-          throw new Error(
-            'Historical feature is enabled and not compatible with multi-chain, to multi-chain index clear postgres schema and re-index project using --multichain'
-          );
-        }
-        return useHistorical;
-      }
-      throw new Error('Metadata table does not exist');
-    } catch (e) {
-      if (multiChain && !disableHistorical) {
-        logger.info('Historical state is not compatible with multi chain indexing, disabling historical..');
-        return false;
-      }
-
-      // Will trigger on first startup as metadata table doesn't exist
-      return !disableHistorical;
-    }
-  }
-
-  private addBlockRangeColumnToIndexes(indexes: IndexesOptions[]): void {
-    indexes.forEach((index) => {
-      if (index.using === IndexType.GIN) {
-        return;
-      }
-      if (!index.fields) {
-        index.fields = [];
-      }
-      index.fields.push('_block_range');
-      index.using = IndexType.GIST;
-      // GIST does not support unique indexes
-      index.unique = false;
-    });
-  }
-
-  // Sequelize model will generate follow query to create hash indexes
-  // Example SQL:  CREATE INDEX "accounts_person_id" ON "polkadot-starter"."accounts" USING hash ("person_id")
-  // This will be rejected from cockroach db due to syntax error
-  // To avoid this we need to create index manually and add to extraQueries in order to create index in db
-  private beforeHandleCockroachIndex(
-    schema: string,
-    modelName: string,
-    indexes: IndexesOptions[],
-    existedIndexes: string[],
-    extraQueries: string[]
-  ): void {
-    if (this.dbType !== SUPPORT_DB.cockRoach) {
-      return;
-    }
-    indexes.forEach((index, i) => {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      if (index.using === IndexType.HASH && !existedIndexes.includes(index.name!)) {
-        const cockroachDbIndexQuery = `CREATE INDEX "${index.name}" ON "${schema}"."${modelToTableName(modelName)}"(${
-          index.fields
-        }) USING HASH;`;
-        extraQueries.push(cockroachDbIndexQuery);
-        if (this.removedIndexes[modelName] === undefined) {
-          this.removedIndexes[modelName] = [];
-        }
-        this.removedIndexes[modelName].push(indexes[i]);
-        delete indexes[i];
-      }
-    });
-  }
-
-  // Due to we have removed hash index, it will be missing from the model, we need temp store it under `this.removedIndexes`
-  // And force add back to the model use `afterHandleCockroachIndex()` after db is synced
-  private afterHandleCockroachIndex(): void {
-    if (this.dbType !== SUPPORT_DB.cockRoach) {
-      return;
-    }
-    const removedIndexes = Object.entries(this.removedIndexes);
-    if (removedIndexes.length > 0) {
-      for (const [model, indexes] of removedIndexes) {
-        const sqModel = this.sequelize.model(model);
-        (sqModel as any)._indexes = (sqModel as any)._indexes.concat(indexes);
-      }
-    }
-  }
-
-  private updateIndexesName(modelName: string, indexes: IndexesOptions[], existedIndexes: string[]): void {
-    indexes.forEach((index) => {
-      // follow same pattern as _generateIndexName
-      const tableName = modelToTableName(modelName);
-      const deprecated = generateIndexName(tableName, index);
-
-      if (!existedIndexes.includes(deprecated)) {
-        const fields = (index.fields ?? []).join('_');
-        index.name = blake2AsHex(`${modelName}_${fields}`, 64).substring(0, 63);
-      }
-    });
-  }
-
-  // Only used with historical to add indexes to ID fields for gettign entitities by ID
-  private addHistoricalIdIndex(model: GraphQLModelsType, indexes: IndexesOptions[]): void {
-    const idFieldName = model.fields.find((field) => field.type === 'ID')?.name;
-    if (idFieldName && !indexes.find((idx) => idx.fields?.includes(idFieldName))) {
-      indexes.push({
-        fields: [Utils.underscoredIf(idFieldName, true)],
-        unique: false,
-      });
-    }
-  }
-
-  private addRelationToMap(
-    relation: GraphQLRelationsType,
-    foreignKeys: Map<string, Map<string, SmartTags>>,
-    model: ModelStatic<any>,
-    relatedModel: ModelStatic<any>
-  ) {
-    switch (relation.type) {
-      case 'belongsTo': {
-        addTagsToForeignKeyMap(foreignKeys, model.tableName, relation.foreignKey, {
-          foreignKey: getVirtualFkTag(relation.foreignKey, relatedModel.tableName),
-        });
-        break;
-      }
-      case 'hasOne': {
-        addTagsToForeignKeyMap(foreignKeys, relatedModel.tableName, relation.foreignKey, {
-          singleForeignFieldName: relation.fieldName,
-        });
-        break;
-      }
-      case 'hasMany': {
-        addTagsToForeignKeyMap(foreignKeys, relatedModel.tableName, relation.foreignKey, {
-          foreignFieldName: relation.fieldName,
-        });
-        break;
-      }
-      default:
-        throw new Error('Relation type is not supported');
-    }
-  }
-
-  addIdAndBlockRangeAttributes(attributes: ModelAttributes<Model<any, any>, any>): void {
-    (attributes.id as ModelAttributeColumnOptions).primaryKey = false;
-    attributes.__id = {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      allowNull: false,
-      primaryKey: true,
-    } as ModelAttributeColumnOptions;
-    attributes.__block_range = {
-      type: DataTypes.RANGE(DataTypes.BIGINT),
-      allowNull: false,
-    } as ModelAttributeColumnOptions;
-  }
-
-  private addScopeAndBlockHeightHooks(sequelizeModel: ModelStatic<any>): void {
-    // TODO, check impact of remove this
-    sequelizeModel.addScope('defaultScope', {
-      attributes: {
-        exclude: ['__id', '__block_range'],
-      },
-    });
-
-    sequelizeModel.addHook('beforeFind', (options) => {
-      (options.where as any).__block_range = {
-        [Op.contains]: this.blockHeight as any,
-      };
-    });
-    sequelizeModel.addHook('beforeValidate', (attributes, options) => {
-      attributes.__block_range = [this.blockHeight, null];
-    });
-  }
-
-  private validateNotifyTriggers(triggerName: string, triggers: NotifyTriggerPayload[]): void {
-    if (triggers.length !== NotifyTriggerManipulationType.length) {
-      throw new Error(
-        `Found ${triggers.length} ${triggerName} triggers, expected ${NotifyTriggerManipulationType.length} triggers `
+      const res = await this.sequelize.query<{key: string; value: boolean | string}>(
+        `SELECT key, value FROM "${schema}"."${metadataTableNames[0]}" WHERE (key = 'historicalStateEnabled')`,
+        {type: QueryTypes.SELECT}
       );
-    }
-    triggers.map((t) => {
-      if (!NotifyTriggerManipulationType.includes(t.eventManipulation)) {
-        throw new Error(`Found unexpected trigger ${t.triggerName} with manipulation ${t.eventManipulation}`);
+
+      if (res[0]?.key !== 'historicalStateEnabled') {
+        throw new Error('Metadata table does not have historicalStateEnabled key');
       }
-    });
+
+      const value = res[0].value;
+
+      if (typeof value === 'string') {
+        if (value === 'height' || value === 'timestamp') {
+          return value;
+        }
+        throw new Error(`Invalid value for historicalStateEnabled. Received "${value}"`);
+      }
+
+      if ((value === true || value.toString() === 'height') && multiChain) {
+        throw new Error(
+          'Historical indexing by height is enabled and not compatible with multi-chain, to multi-chain index clear postgres schema and re-index project using --multichain'
+        );
+      }
+
+      // TODO parse through CLI/Project option and consider multichain
+      return value ? 'height' : false;
+    } catch (e) {
+      if (multiChain && historical === 'height') {
+        logger.warn('Historical state by height is not compatible with multi chain indexing, using timestamp instead.');
+        return 'timestamp';
+      }
+      // Will trigger on first startup as metadata table doesn't exist
+      // Default fallback to "height" for backwards compatible
+      return historical;
+    }
   }
 
-  setBlockHeight(blockHeight: number): void {
-    this._blockHeight = blockHeight;
+  async setBlockHeader(header: Header): Promise<void> {
+    this._blockHeader = header;
+
+    if (this.modelProvider instanceof PlainStoreModelService) {
+      assert(!this.#transaction, new Error(`Transaction already exists for height: ${header.blockHeight}`));
+
+      this.#transaction = await this.sequelize.transaction({
+        deferrable: this._historical ? undefined : Deferrable.SET_DEFERRED(),
+      });
+      this.#transaction.afterCommit(() => (this.#transaction = undefined));
+    }
     if (this.config.proofOfIndex) {
       this.operationStack = new StoreOperations(this.modelsRelations.models);
     }
@@ -667,49 +379,6 @@ export class StoreService {
     return NULL_MERKEL_ROOT;
   }
 
-  private async getAllIndexFields(schema: string) {
-    const fields: IndexField[][] = [];
-    for (const entity of this.modelsRelations.models) {
-      const model = this.sequelize.model(entity.name);
-      const tableFields = await this.packEntityFields(schema, entity.name, model.tableName);
-      fields.push(tableFields);
-    }
-    return flatten(fields);
-  }
-
-  private async packEntityFields(schema: string, entity: string, table: string): Promise<IndexField[]> {
-    const rows = await this.sequelize.query(
-      `select
-    '${entity}' as entity_name,
-    a.attname as field_name,
-    idx.indisunique as is_unique,
-    am.amname as type
-from
-    pg_index idx
-    JOIN pg_class cls ON cls.oid=idx.indexrelid
-    JOIN pg_class tab ON tab.oid=idx.indrelid
-    JOIN pg_am am ON am.oid=cls.relam,
-    pg_namespace n,
-    pg_attribute a
-where
-  n.nspname = '${schema}'
-  and tab.relname = '${table}'
-  and a.attrelid = tab.oid
-  and a.attnum = ANY(idx.indkey)
-  and not idx.indisprimary
-group by
-    n.nspname,
-    a.attname,
-    tab.relname,
-    idx.indisunique,
-    am.amname`,
-      {
-        type: QueryTypes.SELECT,
-      }
-    );
-    return rows.map((result) => camelCaseObjectKey(result)) as IndexField[];
-  }
-
   /**
    * rollback db that is newer than ${targetBlockHeight} (exclusive)
    * set metadata
@@ -717,47 +386,92 @@ group by
    * @param targetBlockHeight
    * @param transaction
    */
-  async rewind(targetBlockHeight: number, transaction: Transaction): Promise<void> {
+  async rewind(targetBlockHeader: Header, transaction: Transaction): Promise<void> {
     if (!this.historical) {
       throw new Error('Unable to reindex, historical state not enabled');
     }
     // This should only been called from CLI, blockHeight in storeService never been set and is required for`beforeFind` hook
     // Height no need to change for rewind during indexing
-    if (this._blockHeight === undefined) {
-      this.setBlockHeight(targetBlockHeight);
+    if (this._blockHeader === undefined) {
+      await this.setBlockHeader(targetBlockHeader);
     }
     for (const model of Object.values(this.sequelize.models)) {
       if ('__block_range' in model.getAttributes()) {
-        await batchDeleteAndThenUpdate(this.sequelize, model, transaction, targetBlockHeight);
+        await batchDeleteAndThenUpdate(
+          this.sequelize,
+          model,
+          transaction,
+          getHistoricalUnit(this.historical, targetBlockHeader)
+        );
       }
     }
-    this.metadataModel.set('lastProcessedHeight', targetBlockHeight);
+
+    await this.metadataModel.set('lastProcessedHeight', targetBlockHeader.blockHeight, transaction);
+    if (targetBlockHeader.timestamp) {
+      await this.metadataModel.set('lastProcessedBlockTimestamp', targetBlockHeader.timestamp.getTime(), transaction);
+    }
     // metadataModel will be flushed in reindex.ts#reindex()
   }
 
   isIndexed(entity: string, field: string): boolean {
+    const indexes = this.modelProvider.getModel(entity).model.options.indexes ?? [];
+
     return (
-      this.modelIndexedFields.findIndex(
-        (indexField) =>
-          upperFirst(camelCase(indexField.entityName)) === entity && camelCase(indexField.fieldName) === field
-      ) > -1
+      indexes.findIndex((idx) => {
+        const matchingField = idx.fields?.find((f) => {
+          const fieldName = (f as any).name ?? f;
+          return camelCase(fieldName) === customCamelCaseGraphqlKey(field);
+        });
+        return !!matchingField;
+      }) > -1
     );
   }
 
   isIndexedHistorical(entity: string, field: string): boolean {
+    const indexes = this.modelProvider.getModel(entity).model.options.indexes ?? [];
+
     return (
-      this.modelIndexedFields.findIndex(
-        (indexField) =>
-          upperFirst(camelCase(indexField.entityName)) === entity &&
-          camelCase(indexField.fieldName) === field &&
-          // With historical indexes are not unique
-          (this.historical || indexField.isUnique)
-      ) > -1
+      indexes.findIndex((idx) => {
+        const matchingField = idx.fields?.find((f) => {
+          const fieldName = (f as any).name ?? f;
+          return camelCase(fieldName) === customCamelCaseGraphqlKey(field);
+        });
+        // With historical indexes are not unique
+        return !!matchingField && (this.historical || idx.unique);
+      }) > -1
     );
   }
 
   getStore(): Store {
-    return new Store(this.config, this.storeCache, this);
+    return new Store(this.config, this.modelProvider, this);
+  }
+
+  // Get the right unit depending on the historical mode
+  getHistoricalUnit(): number {
+    // Cant throw here because even with historical disabled the current height is used by the store
+    return getHistoricalUnit(this.historical, this.blockHeader);
+  }
+
+  async getLastProcessedBlock(): Promise<{height: number; timestamp?: number}> {
+    const {lastProcessedBlockTimestamp: timestamp, lastProcessedHeight: height} = await this.metadataModel.findMany([
+      'lastProcessedHeight',
+      'lastProcessedBlockTimestamp',
+    ]);
+
+    return {height: height || 0, timestamp};
+  }
+
+  private async setMultiChainProject() {
+    if (this.config.multiChain) {
+      this._isMultichain = true;
+      return;
+    }
+
+    const tableRes = await this.sequelize.query<Array<string>>(tableExistsQuery(this.schema), {
+      type: QueryTypes.SELECT,
+    });
+
+    this._isMultichain = !!flatten(tableRes).find((value: string) => MULTI_METADATA_REGEX.test(value));
   }
 }
 
@@ -766,7 +480,7 @@ async function batchDeleteAndThenUpdate(
   sequelize: Sequelize,
   model: ModelStatic<any>,
   transaction: Transaction,
-  targetBlockHeight: number,
+  targetBlockUnit: number, // Height or timestamp
   batchSize = 10000
 ): Promise<void> {
   let destroyCompleted = false;
@@ -780,7 +494,7 @@ async function batchDeleteAndThenUpdate(
               transaction,
               hooks: false,
               limit: batchSize,
-              where: sequelize.where(sequelize.fn('lower', sequelize.col('_block_range')), Op.gt, targetBlockHeight),
+              where: sequelize.where(sequelize.fn('lower', sequelize.col('_block_range')), Op.gt, targetBlockUnit),
             }),
         updateCompleted
           ? [0]
@@ -796,7 +510,7 @@ async function batchDeleteAndThenUpdate(
                   [Op.and]: [
                     {
                       __block_range: {
-                        [Op.contains]: targetBlockHeight,
+                        [Op.contains]: targetBlockUnit,
                       },
                     },
                     sequelize.where(sequelize.fn('upper', sequelize.col('_block_range')), Op.not, null),

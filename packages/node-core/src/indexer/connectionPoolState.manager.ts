@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {OnApplicationShutdown} from '@nestjs/common';
@@ -7,9 +7,11 @@ import chalk from 'chalk';
 import {ApiErrorType} from '../api.connection.error';
 import {IApiConnectionSpecific} from '../api.service';
 import {getLogger} from '../logger';
+import {exitWithError} from '../process';
 import {errorTypeToScoreAdjustment} from './connectionPool.service';
 
-const RETRY_DELAY = 60 * 1000;
+const RETRY_DELAY = 10 * 1000;
+const MAX_RETRY_DELAY = 32 * RETRY_DELAY;
 const MAX_FAILURES = 5;
 const RESPONSE_TIME_WEIGHT = 0.7;
 const FAILURE_WEIGHT = 0.3;
@@ -53,13 +55,22 @@ export class ConnectionPoolStateManager<T extends IApiConnectionSpecific<any, an
 {
   private pool: Record<string, ConnectionPoolItem<T>> = {};
 
+  /**
+   * @param onAllConnectionsRemoved - allows overwritting the behaviour when all connections are removed
+   * */
+  constructor(
+    private onAllConnectionsRemoved: () => void = () => {
+      exitWithError(`All api connection removed`);
+    }
+  ) {}
+
   //eslint-disable-next-line @typescript-eslint/require-await
   async addToConnections(endpoint: string, primary: boolean): Promise<void> {
     const poolItem: ConnectionPoolItem<T> = {
-      primary: primary,
+      primary,
       performanceScore: 100,
       failureCount: 0,
-      endpoint: endpoint,
+      endpoint,
       backoffDelay: 0,
       rateLimited: false,
       failed: false,
@@ -74,8 +85,20 @@ export class ConnectionPoolStateManager<T extends IApiConnectionSpecific<any, an
   }
 
   @Interval(15000)
-  logConnectionStatus() {
-    logger.debug(JSON.stringify(this.pool, null, 2));
+  logConnectionStatus(): void {
+    logger.debug(
+      JSON.stringify(
+        this.pool,
+        (key, value) => {
+          // Cannot stringify NodeJs timeouts
+          if (key === 'timeoutId') {
+            return undefined;
+          }
+          return value;
+        },
+        2
+      )
+    );
   }
 
   //eslint-disable-next-line @typescript-eslint/require-await
@@ -169,13 +192,13 @@ export class ConnectionPoolStateManager<T extends IApiConnectionSpecific<any, an
   }
 
   //eslint-disable-next-line @typescript-eslint/require-await
-  async setTimeout(endpoint: string, delay: number): Promise<void> {
+  async setRecoverTimeout(endpoint: string, delay: number): Promise<void> {
     // Make sure there is no existing timeout
     await this.clearTimeout(endpoint);
 
     this.pool[endpoint].timeoutId = setTimeout(() => {
       this.pool[endpoint].backoffDelay = 0; // Reset backoff delay only if there are no consecutive errors
-      this.pool[endpoint].rateLimited = false;
+      // this.pool[endpoint].rateLimited = false;   // Do not reset rateLimited status
       this.pool[endpoint].failed = false;
       this.pool[endpoint].timeoutId = undefined; // Clear the timeout ID
 
@@ -199,7 +222,9 @@ export class ConnectionPoolStateManager<T extends IApiConnectionSpecific<any, an
   async removeFromConnections(endpoint: string): Promise<void> {
     delete this.pool[endpoint];
     if (Object.keys(this.pool).length === 0) {
-      process.exit(1);
+      // Cannot throw here because it would be off stack
+      logger.error('No more connections available. Please add healthier endpoints');
+      this.onAllConnectionsRemoved();
     }
   }
 
@@ -220,33 +245,44 @@ export class ConnectionPoolStateManager<T extends IApiConnectionSpecific<any, an
     this.pool[endpoint].performanceScore += adjustment;
     this.pool[endpoint].failureCount++;
 
-    if (errorType === ApiErrorType.Connection) {
-      if (this.pool[endpoint].connected) {
-        //handleApiDisconnects was already called if this is false
-        //this.handleApiDisconnects(endpoint);
-        this.pool[endpoint].connected = false;
+    switch (errorType) {
+      case ApiErrorType.Connection: {
+        if (this.pool[endpoint].connected) {
+          // The connected status does not provide service. handleApiDisconnects() will be called to handle this.
+          this.pool[endpoint].connected = false;
+        }
+        return;
       }
-      return;
-    }
-
-    if (errorType !== ApiErrorType.Default) {
-      const nextDelay = RETRY_DELAY * Math.pow(2, this.pool[endpoint].failureCount - 1); // Exponential backoff using failure count // Start with RETRY_DELAY and double on each failure
-      this.pool[endpoint].backoffDelay = nextDelay;
-
-      if (ApiErrorType.Timeout || ApiErrorType.RateLimit) {
+      case ApiErrorType.Timeout:
+      case ApiErrorType.RateLimit: {
+        // The “rateLimited” status will be selected when no endpoints are available, so we should avoid setting a large delay.
         this.pool[endpoint].rateLimited = true;
-      } else {
-        this.pool[endpoint].failed = true;
+        break;
       }
-
-      await this.setTimeout(endpoint, nextDelay);
-
-      logger.warn(
-        `Endpoint ${this.pool[endpoint].endpoint} experienced an error (${errorType}). Suspending for ${
-          nextDelay / 1000
-        }s.`
-      );
+      case ApiErrorType.Default: {
+        // The “failed” status does not provide service.
+        this.pool[endpoint].failed = true;
+        break;
+      }
+      default: {
+        throw new Error(`Unknown error type ${errorType}`);
+      }
     }
+
+    const nextDelay = this.calculateNextDelay(this.pool[endpoint]);
+    this.pool[endpoint].backoffDelay = nextDelay;
+    await this.setRecoverTimeout(endpoint, nextDelay);
+
+    logger.warn(
+      `Endpoint ${this.pool[endpoint].endpoint} experienced an error (${errorType}). Suspending for ${
+        nextDelay / 1000
+      }s.`
+    );
+  }
+
+  private calculateNextDelay(poolItem: ConnectionPoolItem<T>): number {
+    // Exponential backoff using failure count, Start with RETRY_DELAY and double on each failure, MAX_RETRY_DELAY is the maximum delay
+    return Math.min(RETRY_DELAY * Math.pow(2, poolItem.failureCount - 1), MAX_RETRY_DELAY);
   }
 
   private calculatePerformanceScore(responseTime: number, failureCount: number): number {

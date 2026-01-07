@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import fs from 'fs';
@@ -39,6 +39,9 @@ describe('ReaderFactory', () => {
   it.skip('should support archive files', async () => {
     const reader = await ReaderFactory.create(tarPath);
     const finalPath = reader.root;
+    if (!finalPath) {
+      throw new Error('finalPath error');
+    }
     expect(fs.existsSync(finalPath)).toBeTruthy();
   });
 

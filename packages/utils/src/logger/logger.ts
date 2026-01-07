@@ -1,7 +1,8 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import path from 'path';
+import {isMainThread, threadId} from 'worker_threads';
 import {stringify} from 'flatted';
 import Pino, {LevelWithSilent} from 'pino';
 import {createStream} from 'rotating-file-stream';
@@ -19,12 +20,44 @@ export interface LoggerOption {
   debugFilter?: string[];
 }
 
+function formatErrorString(err: unknown, stack = false): string {
+  if (err instanceof Error) {
+    const t = err.constructor.name ?? 'Error';
+    let formattedError = `${ctx.red(`${t}:`)} ${ctx.yellow(err.message)}`;
+
+    if (stack) {
+      formattedError += `\n${ctx.red('Stack:')} ${ctx.gray(err.stack)}`;
+    }
+
+    if (err.cause) {
+      formattedError += `\n${ctx.red('Cause:')} ${formatErrorString(err.cause, stack)}`;
+    }
+
+    return formattedError;
+  }
+  return String(err);
+}
+
+function formatErrorJson(err: unknown): unknown {
+  if (err instanceof Error) {
+    return {
+      type: 'error',
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+      cause: err.cause ? formatErrorJson(err.cause) : undefined,
+    };
+  } else {
+    return stringify(err);
+  }
+}
+
 export class Logger {
   private pino: Pino.Logger;
   private childLoggers: {[category: string]: Pino.Logger} = {};
   private _debugFilter: string[];
 
-  constructor({filepath, level: logLevel = 'info', nestedKey, outputFormat, rotate, debugFilter = []}: LoggerOption) {
+  constructor({debugFilter = [], filepath, level: logLevel = 'info', nestedKey, outputFormat, rotate}: LoggerOption) {
     this._debugFilter = debugFilter;
 
     const options = {
@@ -40,18 +73,7 @@ export class Logger {
       serializers:
         outputFormat === 'json'
           ? {
-              payload: (value) => {
-                if (value instanceof Error) {
-                  return {
-                    type: 'error',
-                    name: value.name,
-                    message: value.message,
-                    stack: value.stack,
-                  };
-                } else {
-                  return stringify(value);
-                }
-              },
+              payload: formatErrorJson,
             }
           : {},
       prettyPrint: outputFormat !== 'json',
@@ -71,9 +93,9 @@ export class Logger {
           let error = '';
           if (payload instanceof Error) {
             if (['debug', 'trace'].includes(logLevel)) {
-              error = `\n${payload.stack}`;
+              error = `\n${formatErrorString(payload, true)}`;
             } else {
-              error = `${payload.name}: ${payload.message}`;
+              error = formatErrorString(payload);
             }
           }
           return `${time} <${ctx.magentaBright(category)}> ${colorizeLevel(level)} ${message} ${error}\n`;
@@ -132,12 +154,14 @@ export class Logger {
   private applyChildDebug(category: string) {
     if (!this.childLoggers[category].level) return;
 
-    if (this.debugFilter.includes(`-${category}`)) {
+    const checkCategory = isMainThread ? category : category.replace(`-#${threadId}`, '');
+
+    if (this.debugFilter.includes(`-${checkCategory}`)) {
       this.pino.info(`Debug logging is disabled for ${category}`);
       // Set the log level to the global log level or INFO if its debug
       const newLevel = Math.max(LEVELS_MAP[<LevelWithSilent>this.pino.level], LEVELS_MAP.info);
       this.childLoggers[category].level = LEVELS[newLevel as keyof typeof LEVELS].toLowerCase();
-    } else if (this.debugFilter.includes(category)) {
+    } else if (this.debugFilter.includes(checkCategory)) {
       this.pino.info(`Debug logging is enabled for ${category}`);
       this.childLoggers[category].level = 'debug';
     } else if (this.debugFilter.includes('*')) {

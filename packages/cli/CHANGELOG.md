@@ -5,6 +5,381 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- Issue initializing .env file endpoints array (#2997)
+
+## [6.6.2] - 2025-12-16
+### Fixed
+- Ethers import error (#2984)
+
+### Changed
+- Update MCP SDK and lock down version (#2984)
+
+## [6.6.1] - 2025-11-20
+### Changed
+- Update glob dependency (#2970)
+
+## [6.6.0] - 2025-11-17
+### Added
+- Dynamic networks mapping for subgraph migration (#2964)
+
+### Fixed
+- Subgraph migration transaction handler filter (#2964)
+
+## [6.5.1] - 2025-10-22
+### Changed
+- Fix some typos (#2938)
+- Update swagger-typescript-api (#2939)
+
+## [6.5.0] - 2025-10-15
+### Changed
+- Swap `websocket` for `ws` dependency to fix CVEs (#2931)
+- Minor improvements and fixes from upgrading to eslint 9 with stricter settings (#2929)
+
+### Removed
+- Unused `ora` dependency (#2934)
+
+## [6.4.1] - 2025-09-26
+### Added
+- Build manifest command (#2923)
+
+### Changed
+- Rerelease of previous version
+
+## [6.4.0] - 2025-09-25
+### Added
+- Build manifest command (#2923)
+
+## [6.3.0] - 2025-09-16
+### Added
+- Support for consumer operations on the network via CLI and MCP (#2876)
+- Support for .env in mapping handlers (#2901)
+
+## [6.2.2] - 2025-08-29
+### Changed
+- Fixed typos (#2895)
+
+## [6.2.1] - 2025-08-26
+### Fixed
+- Missing jsonc-parser dependency
+
+## [6.2.0] - 2025-08-25
+### Changed
+- Revert building using esbuild and switch back to webpack (#2891)
+
+## [6.1.3] - 2025-08-01
+### Fixed
+- Issues building ts manifest when running cli from npx (#2877)
+
+## [6.1.2] - 2025-07-31
+### Fixed
+- Build command failing on Windows (#2874)
+
+## [6.1.1] - 2025-07-29
+### Fixed
+- Fix build command for multi-chain projects (#2869)
+
+## [6.1.0] - 2025-07-24
+### Changed
+- Introduce pollyfill files for building (#2865)
+
+## [6.0.2] - 2025-07-17
+### Fixed
+- MCP server version #2853
+
+### Changed
+- Workspace dependencies now match to patch versions rather than exact (#2855)
+
+## [6.0.1] - 2025-07-14
+### Fixed
+- MCP command not running (#2848)
+
+## [6.0.0] - 2025-07-14
+### Added
+- `mcp` subcommand to provide an MCP server for using subquery projects (#2844)
+
+### Changed
+- BEAKING: update all subcommands for consistency (#2844)
+  - Consistent location arguments instead of various flag names when specifying a project or project manifest
+  - Renamed commands relating to OnFinality to their own topic
+
+### Fixed
+- Issues not finding the chain specific common package when using global cli (#2844)
+
+## [5.14.1] - 2025-07-14
+### Fixed
+- Build command not checking ts types (#2842)
+
+## [5.14.0] - 2025-07-01
+### Removed
+- Test files and artifacts from published package (#2838)
+
+## [5.13.0] - 2025-06-25
+### Removed
+- fs-extra dependency in favour of fs (#2824)
+
+### Changed
+- Switch build command from webpack to esbuild and support projects using pnpm (#2825)
+
+## [5.12.0] - 2025-06-12
+### Changed
+- Update `oclif` dependency (#2817)
+- Update command descriptions (#2817)
+- Alias `codegen:generate` to `import-abi` (#2817)
+
+### Added
+- The `codegen:generate` command can now attempt to pull ABIs from etherscan (#2817)
+
+## [5.11.0] - 2025-06-05
+### Changed
+- Init command to have more arguments and avoid interaction (#2809)
+
+## [5.10.0] - 2025-05-20
+### Added
+- Support for Solana Codegen (#2787)
+- Support for jsonc tsconfigs in projects (#2796)
+
+## [5.9.1] - 2025-05-08
+### Changed
+- Updated readme (#2781)
+
+## [5.9.0] - 2025-04-30
+### Removed
+- Unused node-fetch dependency (#2772)
+- Problematic boxen dependency (#2774)
+
+### Changed
+- Remove requirement for SUBQL_ACCESS_TOKEN with publish command (#2773)
+
+## [5.8.1] - 2025-04-24
+### Changed
+- Update @subql/utils
+
+## [5.8.0] - 2025-04-17
+### Added
+- Support for Solana (#2745)
+
+## [5.7.1] - 2025-03-20
+### Fixed
+- Testing not updating test results correctly if fetching block fails (#2716)
+
+## [5.7.0] - 2025-02-25
+### Changed
+- Bump `typescript` version
+
+## [5.6.0] - 2025-02-19
+### Changed
+- Update polkadot api to 15 (#2680)
+
+## [5.5.2] - 2025-02-13
+### Fixed
+- Project names containing uppercase letters cannot be deployed.
+
+## [5.5.1] - 2025-02-04
+### Changed
+- Update copyright header to 2025
+
+### Fixed
+- Various typos
+- Codegen producing invalid typescript with dbType directive (#2662)
+
+## [5.5.0] - 2025-01-28
+### Added
+- Add some constants for Starknet
+
+### Changed
+- Added internal note relating to some tests
+
+### Fixed
+- Codegen: getByFields being invalid code (#2649)
+
+## [5.4.0] - 2024-12-11
+### Changed
+- Updated codegen to support id types other than string (#2622)
+
+### Fixed
+- Missing chalk dependency (#2622)
+
+## [5.3.3] - 2024-12-04
+### Changed
+- No actual changes, just a re-release
+
+## [5.3.2] - 2024-11-25
+### Changed
+- Update polkadot/api library to 14 version
+
+## [5.3.1] - 2024-11-22
+### Fixed
+- Multi-chain project initialization error
+
+## [5.3.0] - 2024-10-21
+### Changed
+- Improve codegen error messages (#2567)
+- Update codegen to match changes to store interface making options.limit required on getByField(s) methods (#2567)
+
+## [5.2.8] - 2024-09-25
+### Changed
+- Bump common, Added manifest support for query-subgraph.
+
+## [5.2.7] - 2024-09-16
+### Fixed
+- deployment command minor issues (#2542)
+
+### Removed
+- deprecated cli-ux dependency, switched to using inquirer and ora (#2542)
+
+## [5.2.6] - 2024-09-09
+### Changed
+- Bump webpack from 5.93.0 to 5.94.0
+
+## [5.2.4] - 2024-08-23
+### Fixed
+- Fix migrate schema missing conversion for `Bytes` and `BigDecimal` type (#2538)
+
+## [5.2.3] - 2024-08-14
+### Fixed
+- Supports subgraph migration `kind: ethereum`.
+
+## [5.2.2] - 2024-08-14
+### Added
+- fix case sensitive import for schema entities in codegen (#2211)
+
+### Fixed
+- Glob sync issue (#2534)
+
+## [5.2.1] - 2024-08-12
+### Changed
+- Default deployment type to SubQuery when deploying to the managed service (#2523).
+
+## [5.2.0] - 2024-08-05
+### Changed
+- Update inquirer dependencies (#2501)
+- Improve endpoint type to be based on core type (#2511)
+- Update dependencies (#2518)
+
+### Fixed
+- Not being able to select a custom repo when initializing a project (#2501)
+
+### Added
+- Subgraph graphql schema migration to the migrate command (#2499)
+
+## [5.1.1] - 2024-07-25
+### Changed
+- Bump versions with `@subql/common` and `@subql/utils` (#2498)
+
+## [5.1.0] - 2024-07-11
+### Changed
+- Use `IPFSHTTPClientLite` replace `IPFSHTTPClient` (#2480)
+
+## [5.0.1] - 2024-07-09
+### Changed
+- Changes to ts build settings (#2475)
+
+## [5.0.0] - 2024-07-04
+### Added
+- Enable ts strict mode
+
+### Fixed
+- The IPFS CID for multi-chain requires the directory CID.
+
+### Changed
+- Breaking Change: Removed common network packages from dependencies, only import required module from local/global when using. (#2456)
+
+## [4.15.0] - 2024-06-21
+### Changed
+- Update `@subql/utils`, `@subql/common` and other dependencies
+
+## [4.14.0] - 2024-06-18
+### Removed
+- Deprecated flare SDK (#2428)
+
+## [4.13.1] - 2024-06-12
+### Changed
+- Update `@subql/utils`
+
+## [4.13.0] - 2024-06-12
+### Changed
+- Improve logging and error handling for multichain deploy (#2434)
+
+### Fixed
+- Add missing networks for migration
+- Fixed init command path issue
+- Update common-ethereum to fix issue with ABI validation (#2435)
+
+## [4.12.0] - 2024-06-05
+### Changed
+- Bump with common dependencies
+
+## [4.11.0] - 2024-05-30
+### Added
+- `--queryLimit` flag to deploy command for query service (#2419)
+
+## [4.10.1] - 2024-05-27
+### Fixed
+- Enums being exported twice with codegen
+
+## [4.10.0] - 2024-05-22
+### Changed
+- Remove unused imports (#2408)
+
+## [4.9.0] - 2024-05-20
+### Changed
+- Bump common dependencies to latest version
+
+## [4.8.0] - 2024-05-08
+### Changed
+- Bump with @subql/util, update polkadot dependencies to v11
+
+## [4.7.0] - 2024-05-02
+### Added
+- Migrate a subgraph project to subquery project
+  - enbale migrate its `subgraph.yaml` to `project.ts`
+
+## [4.6.0] - 2024-04-24
+### Added
+- support env & env commands (#2345)
+
+## [4.5.2] - 2024-04-12
+### Fixed
+- Deployments failing with `this.jsonEnabled is not a function` (#2351)
+
+## [4.5.1] - 2024-04-11
+### Fixed
+- Upgrade common dependencies in cli in order to fix build missing `GetOptions` issue
+
+## [4.5.0] - 2024-03-28
+### Added
+- Support multi-chain deployments (#2290)
+
+### Fixed
+- Auth token being undefined when loading from file (#2309)
+
+### Changed
+- Update codegen to use options type and add comment to generated code (#2325)
+
+## [4.4.1] - 2024-03-08
+### Fixed
+- Access token paths on Windows for commands other than publish (#2291)
+
+## [4.4.0] - 2024-03-05
+### Changed
+- Update deployment command to align with ManagedService API changes (#2282)
+
+## [4.3.0] - 2024-02-29
+### Fixed
+- Publish command output flag not working (#2270)
+
+### Changed
+- Update deployment flags to match managed service (#2274)
+
+## [4.2.7] - 2024-02-23
+### Changed
+- Bump axios from 0.27.0 to 0.28.0 (#2262)
+
+## [4.2.6] - 2024-02-02
+### Fixed
+- Bump `common-cosmos` Codegen failing on Windows by using forked version of `telescope` (#2239)
+- Bump `common-ethereum` with Codegen typechain fix (#2239)
 
 ## [4.2.5] - 2023-12-22
 ### Fixed
@@ -224,7 +599,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.0] - 2022-10-27
 ### Added
-- `--dedicatedDB` option to project deployement. (#1355)
+- `--dedicatedDB` option to project deployment. (#1355)
 - Flags for advanced settings. (#1352)
 
 ### Fixed
@@ -478,7 +853,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@subql/node` will recognise it and create table with additional indexes to speed querying
 - Allow query by indexed field via `global.store` (#271)
 - annotation is now supported in
-- We'll automatically generate coresponding JSON interfaces when querying this data (#275)
+- We'll automatically generate corresponding JSON interfaces when querying this data (#275)
 - Read more about how you can use this in our [updated docs](https://doc.subquery.network/create/graphql.html#json-type)
 
 ## [0.8.0] - 2021-03-11
@@ -510,7 +885,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - 2021-01-15
 ### Changed
-- subql init doesn' need --starter by default (#86)
+- subql init doesn't need --starter by default (#86)
 - model template use bigint instead of BigInt (#82)
 
 ## [0.2.0] - 2020-12-22
@@ -518,7 +893,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - support subcommand codegen
 - support subcommand init
 
-[Unreleased]: https://github.com/subquery/subql/compare/cli/4.2.5...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/cli/6.6.2...HEAD
+[6.6.2]: https://github.com/subquery/subql/compare/cli/6.6.1...cli/6.6.2
+[6.6.1]: https://github.com/subquery/subql/compare/cli/6.6.0...cli/6.6.1
+[6.6.0]: https://github.com/subquery/subql/compare/cli/6.5.1...cli/6.6.0
+[6.5.1]: https://github.com/subquery/subql/compare/cli/6.5.0...cli/6.5.1
+[6.5.0]: https://github.com/subquery/subql/compare/cli/6.4.1...cli/6.5.0
+[6.4.1]: https://github.com/subquery/subql/compare/cli/6.4.0...cli/6.4.1
+[6.4.0]: https://github.com/subquery/subql/compare/cli/6.3.0...cli/6.4.0
+[6.3.0]: https://github.com/subquery/subql/compare/cli/6.2.2...cli/6.3.0
+[6.2.2]: https://github.com/subquery/subql/compare/cli/6.2.1...cli/6.2.2
+[6.2.1]: https://github.com/subquery/subql/compare/cli/6.2.0...cli/6.2.1
+[6.2.0]: https://github.com/subquery/subql/compare/cli/6.1.3...cli/6.2.0
+[6.1.3]: https://github.com/subquery/subql/compare/cli/6.1.2...cli/6.1.3
+[6.1.2]: https://github.com/subquery/subql/compare/cli/6.1.1...cli/6.1.2
+[6.1.1]: https://github.com/subquery/subql/compare/cli/6.1.0...cli/6.1.1
+[6.1.0]: https://github.com/subquery/subql/compare/cli/6.0.2...cli/6.1.0
+[6.0.2]: https://github.com/subquery/subql/compare/cli/6.0.1...cli/6.0.2
+[6.0.1]: https://github.com/subquery/subql/compare/cli/6.0.0...cli/6.0.1
+[6.0.0]: https://github.com/subquery/subql/compare/cli/5.14.1...cli/6.0.0
+[5.14.1]: https://github.com/subquery/subql/compare/cli/5.14.0...cli/5.14.1
+[5.14.0]: https://github.com/subquery/subql/compare/cli/5.13.0...cli/5.14.0
+[5.13.0]: https://github.com/subquery/subql/compare/cli/5.12.0...cli/5.13.0
+[5.12.0]: https://github.com/subquery/subql/compare/cli/5.11.0...cli/5.12.0
+[5.11.0]: https://github.com/subquery/subql/compare/cli/5.10.0...cli/5.11.0
+[5.10.0]: https://github.com/subquery/subql/compare/cli/5.9.1...cli/5.10.0
+[5.9.1]: https://github.com/subquery/subql/compare/cli/5.9.0...cli/5.9.1
+[5.9.0]: https://github.com/subquery/subql/compare/cli/5.8.1...cli/5.9.0
+[5.8.1]: https://github.com/subquery/subql/compare/cli/5.8.0...cli/5.8.1
+[5.8.0]: https://github.com/subquery/subql/compare/cli/5.7.1...cli/5.8.0
+[5.7.1]: https://github.com/subquery/subql/compare/cli/5.7.0...cli/5.7.1
+[5.7.0]: https://github.com/subquery/subql/compare/cli/5.6.0...cli/5.7.0
+[5.6.0]: https://github.com/subquery/subql/compare/cli/5.5.2...cli/5.6.0
+[5.5.2]: https://github.com/subquery/subql/compare/cli/5.5.1...cli/5.5.2
+[5.5.1]: https://github.com/subquery/subql/compare/cli/5.5.0...cli/5.5.1
+[5.5.0]: https://github.com/subquery/subql/compare/cli/5.4.0...cli/5.5.0
+[5.4.0]: https://github.com/subquery/subql/compare/cli/5.3.3...cli/5.4.0
+[5.3.3]: https://github.com/subquery/subql/compare/cli/5.3.2...cli/5.3.3
+[5.3.2]: https://github.com/subquery/subql/compare/cli/5.3.1...cli/5.3.2
+[5.3.1]: https://github.com/subquery/subql/compare/cli/5.3.0...cli/5.3.1
+[5.3.0]: https://github.com/subquery/subql/compare/cli/5.2.8...cli/5.3.0
+[5.2.8]: https://github.com/subquery/subql/compare/cli/5.2.7...cli/5.2.8
+[5.2.7]: https://github.com/subquery/subql/compare/cli/5.2.6...cli/5.2.7
+[5.2.6]: https://github.com/subquery/subql/compare/cli/5.2.4...cli/5.2.6
+[5.2.4]: https://github.com/subquery/subql/compare/cli/5.2.3...cli/5.2.4
+[5.2.3]: https://github.com/subquery/subql/compare/cli/5.2.2...cli/5.2.3
+[5.2.2]: https://github.com/subquery/subql/compare/cli/5.2.1...cli/5.2.2
+[5.2.1]: https://github.com/subquery/subql/compare/cli/5.2.0...cli/5.2.1
+[5.2.0]: https://github.com/subquery/subql/compare/cli/5.1.1...cli/5.2.0
+[5.1.1]: https://github.com/subquery/subql/compare/cli/5.1.0...cli/5.1.1
+[5.1.0]: https://github.com/subquery/subql/compare/cli/5.0.1...cli/5.1.0
+[5.0.1]: https://github.com/subquery/subql/compare/cli/5.0.0...cli/5.0.1
+[5.0.0]: https://github.com/subquery/subql/compare/cli/4.15.0...cli/5.0.0
+[4.15.0]: https://github.com/subquery/subql/compare/cli/4.14.0...cli/4.15.0
+[4.14.0]: https://github.com/subquery/subql/compare/cli/4.13.1...cli/4.14.0
+[4.13.1]: https://github.com/subquery/subql/compare/cli/4.13.0...cli/4.13.1
+[4.13.0]: https://github.com/subquery/subql/compare/cli/4.12.0...cli/4.13.0
+[4.12.0]: https://github.com/subquery/subql/compare/cli/4.11.0...cli/4.12.0
+[4.11.0]: https://github.com/subquery/subql/compare/cli/4.10.1...cli/4.11.0
+[4.10.1]: https://github.com/subquery/subql/compare/cli/4.10.0...cli/4.10.1
+[4.10.0]: https://github.com/subquery/subql/compare/cli/4.9.0...cli/4.10.0
+[4.9.0]: https://github.com/subquery/subql/compare/cli/4.8.0...cli/4.9.0
+[4.8.0]: https://github.com/subquery/subql/compare/cli/4.7.0...cli/4.8.0
+[4.7.0]: https://github.com/subquery/subql/compare/cli/4.6.0...cli/4.7.0
+[4.6.0]: https://github.com/subquery/subql/compare/cli/4.5.2...cli/4.6.0
+[4.5.2]: https://github.com/subquery/subql/compare/cli/4.5.1...cli/4.5.2
+[4.5.1]: https://github.com/subquery/subql/compare/cli/4.5.0...cli/4.5.1
+[4.5.0]: https://github.com/subquery/subql/compare/cli/4.4.1...cli/4.5.0
+[4.4.1]: https://github.com/subquery/subql/compare/cli/4.4.0...cli/4.4.1
+[4.4.0]: https://github.com/subquery/subql/compare/cli/4.3.0...cli/4.4.0
+[4.3.0]: https://github.com/subquery/subql/compare/cli/4.2.7...cli/4.3.0
+[4.2.7]: https://github.com/subquery/subql/compare/cli/4.2.6...cli/4.2.7
+[4.2.6]: https://github.com/subquery/subql/compare/cli/4.2.5...cli/4.2.6
 [4.2.5]: https://github.com/subquery/subql/compare/cli/4.2.4...cli/4.2.5
 [4.2.4]: https://github.com/subquery/subql/compare/cli/4.2.3...cli/4.2.4
 [4.2.3]: https://github.com/subquery/subql/compare/cli/4.2.2...cli/4.2.3

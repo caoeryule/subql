@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 export enum IndexerEvent {
@@ -15,11 +15,31 @@ export enum IndexerEvent {
   StoreCacheThreshold = 'store_cache_threshold',
   StoreCacheRecordsSize = 'store_cache_records_size',
   Ready = 'ready',
+  RewindSuccess = 'rewind_success',
+  RewindFailure = 'rewind_failure',
+}
+
+export enum AdminEvent {
+  rewindTarget = 'rewind_target',
+  RewindTargetResponse = 'rewind_target_response',
 }
 
 export enum PoiEvent {
   LatestSyncedPoi = 'poi_synced',
   PoiTarget = 'poi_target',
+}
+
+export enum MultiChainRewindEvent {
+  Rewind = 'rewind',
+  RewindComplete = 'rewind_complete',
+  RewindTimestampDecreased = 'timestamp_decreased',
+  FullyRewind = 'fully_rewind',
+}
+
+export interface RewindPayload {
+  success: boolean;
+  height: number;
+  message?: string;
 }
 
 export interface ProcessBlockPayload {

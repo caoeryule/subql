@@ -1,26 +1,35 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import { Module } from '@nestjs/common';
-import { EventEmitterModule } from '@nestjs/event-emitter';
-import { SchedulerRegistry } from '@nestjs/schedule';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
-  DbModule,
   ForceCleanService,
-  StoreCacheService,
   ReindexService,
   StoreService,
   PoiService,
+  ConnectionPoolService,
+  NodeConfig,
+  ConnectionPoolStateManager,
+  storeModelFactory,
+  DsProcessorService,
+  UnfinalizedBlocksService,
+  DynamicDsService,
+  MultiChainRewindService,
 } from '@subql/node-core';
-import { ConfigureModule } from '../configure/configure.module';
+import { Sequelize } from '@subql/x-sequelize';
+import { BlockchainService } from '../blockchain.service';
+
 import { ApiService } from '../indexer/api.service';
-import { DsProcessorService } from '../indexer/ds-processor.service';
-import { DynamicDsService } from '../indexer/dynamic-ds.service';
-import { UnfinalizedBlocksService } from '../indexer/unfinalizedBlocks.service';
+import { RuntimeService } from '../indexer/runtime/runtimeService';
 
 @Module({
   providers: [
-    StoreCacheService,
+    {
+      provide: 'IStoreModelProvider',
+      useFactory: storeModelFactory,
+      inject: [NodeConfig, EventEmitter2, Sequelize],
+    },
     StoreService,
     ReindexService,
     PoiService,
@@ -34,24 +43,29 @@ import { UnfinalizedBlocksService } from '../indexer/unfinalizedBlocks.service';
       useClass: DynamicDsService,
     },
     DsProcessorService,
+    ConnectionPoolStateManager,
+    ConnectionPoolService,
     {
       // Used to work with DI for unfinalizedBlocksService but not used with reindex
-      provide: ApiService,
-      useFactory: () => undefined,
+      provide: 'APIService',
+      useFactory: ApiService.init,
+      inject: [
+        'ISubqueryProject',
+        ConnectionPoolService,
+        EventEmitter2,
+        NodeConfig,
+      ],
     },
-    SchedulerRegistry,
+    {
+      provide: 'RuntimeService',
+      useClass: RuntimeService,
+    },
+    {
+      provide: 'IBlockchainService',
+      useClass: BlockchainService,
+    },
+    MultiChainRewindService,
   ],
   controllers: [],
 })
 export class ReindexFeatureModule {}
-
-@Module({
-  imports: [
-    DbModule.forRoot(),
-    ConfigureModule.register(),
-    ReindexFeatureModule,
-    EventEmitterModule.forRoot(),
-  ],
-  controllers: [],
-})
-export class ReindexModule {}

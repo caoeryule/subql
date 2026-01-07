@@ -1,24 +1,24 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import {Store, FieldsExpression} from '@subql/types-core';
+import {Store, FieldsExpression, GetOptions, Entity} from '@subql/types-core';
 import {unwrapProxyArgs} from './utils';
 
 export type HostStore = {
   // This matches the store interface
-  storeGet: (entity: string, id: string) => Promise<any | null>;
-  storeGetByField: (
+  storeGet: (entity: string, id: string) => Promise<any>;
+  storeGetByField: <T extends Entity>(
     entity: string,
-    field: string,
+    field: keyof T,
     value: any,
-    options?: {offset?: number; limit?: number}
-  ) => Promise<any[]>;
-  storeGetByFields: (
+    options: GetOptions<T>
+  ) => Promise<T[]>;
+  storeGetByFields: <T extends Entity>(
     entity: string,
-    filter: FieldsExpression<any>[],
-    options?: {offset?: number; limit?: number}
-  ) => Promise<any[]>;
-  storeGetOneByField: (entity: string, field: string, value: any) => Promise<any | null>;
+    filter: FieldsExpression<T>[],
+    options: GetOptions<T>
+  ) => Promise<T[]>;
+  storeGetOneByField: (entity: string, field: string, value: any) => Promise<any>;
   storeSet: (entity: string, id: string, data: any) => Promise<void>;
   storeBulkCreate: (entity: string, data: any[]) => Promise<void>;
   storeBulkUpdate: (entity: string, data: any[], fields?: string[]) => Promise<void>;
@@ -39,7 +39,7 @@ export const hostStoreKeys: (keyof HostStore)[] = [
 ];
 
 // Entities have to be converted to plain objects so they can be serialized.
-// We don't need the funcitons to be included
+// We don't need the functions to be included
 export const hostStoreToStore = (host: HostStore): Store => {
   return {
     get: unwrapProxyArgs(host.storeGet),
@@ -57,8 +57,8 @@ export const hostStoreToStore = (host: HostStore): Store => {
 export function storeHostFunctions(store: Store): HostStore {
   return {
     storeGet: store.get.bind(store),
-    storeGetByField: store.getByField.bind(store),
-    storeGetByFields: store.getByFields.bind(store),
+    storeGetByField: store.getByField.bind<any>(store),
+    storeGetByFields: store.getByFields.bind<any>(store),
     storeGetOneByField: store.getOneByField.bind(store),
     storeSet: store.set.bind(store),
     storeBulkCreate: store.bulkCreate.bind(store),

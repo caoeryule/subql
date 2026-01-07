@@ -1,18 +1,30 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'assert';
 import {isMainThread} from 'worker_threads';
-import {findLast, last} from 'lodash';
-import {CacheMetadataModel, ISubqueryProject} from '../indexer';
+import {ParentProject} from '@subql/types-core';
+import {Sequelize, Transaction} from '@subql/x-sequelize';
+import {findLast, last, parseInt} from 'lodash';
+import {SchemaMigrationService} from '../db';
+import {IMetadata, IStoreModelProvider, ISubqueryProject, StoreService} from '../indexer';
 import {getLogger} from '../logger';
+import {exitWithError, monitorWrite} from '../process';
 import {getStartHeight, mainThreadOnly} from '../utils';
-import {BlockHeightMap} from '../utils/blockHeightMap';
+import {BlockHeightMap, EntryNotFoundError} from '../utils/blockHeightMap';
+import {NodeConfig} from './NodeConfig';
 
 type OnProjectUpgradeCallback<P> = (height: number, project: P) => void | Promise<void>;
 
 export interface IProjectUpgradeService<P extends ISubqueryProject = ISubqueryProject> {
-  init: (metadata: CacheMetadataModel, onProjectUpgrade?: OnProjectUpgradeCallback<P>) => Promise<number | undefined>;
+  init: (
+    storeService: StoreService,
+    currentHeight: number,
+    config: NodeConfig,
+    sequelize: Sequelize,
+    schema: string,
+    onProjectUpgrade?: OnProjectUpgradeCallback<P>
+  ) => Promise<number | undefined>;
   /**
    * This should only be called from within a worker thread as they dont have access to the store
    * */
@@ -20,9 +32,16 @@ export interface IProjectUpgradeService<P extends ISubqueryProject = ISubqueryPr
   updateIndexedDeployments: (id: string, blockHeight: number) => Promise<void>;
   readonly currentHeight: number;
   setCurrentHeight: (newHeight: number) => Promise<void>;
+  isRewindable: boolean;
   currentProject: P;
   projects: Map<number, P>;
   getProject: (height: number) => P;
+  rewind: (
+    targetBlockHeight: number,
+    lastProcessedHeight: number,
+    transaction: Transaction,
+    storeService: StoreService
+  ) => Promise<void>;
 }
 
 const serviceKeys: Array<keyof IProjectUpgradeService> = [
@@ -32,19 +51,24 @@ const serviceKeys: Array<keyof IProjectUpgradeService> = [
   'projects',
   'init',
   'updateIndexedDeployments',
+  'isRewindable',
 ];
 
 function assertEqual<T>(valueA: T, valueB: T, name: string) {
   assert(valueA === valueB, `Expected ${name} to be equal. expected="${valueA}" parent has="${valueB}"`);
 }
 
-const logger = getLogger('ProjectUpgradeSevice');
+function getParentBlock(parent: ParentProject): number {
+  return parent.untilBlock ?? parent.block;
+}
+
+const logger = getLogger('ProjectUpgradeService');
 
 /*
   We setup a proxy here so that we can have a class that matches ISubquery project but will change when we set the current height to the correct project
 */
 export function upgradableSubqueryProject<P extends ISubqueryProject>(
-  upgradeService: ProjectUpgradeSevice<P>
+  upgradeService: ProjectUpgradeService<P>
 ): P & IProjectUpgradeService<P> {
   return new Proxy<P & IProjectUpgradeService<P>>(upgradeService as any, {
     set() {
@@ -66,7 +90,7 @@ export function upgradableSubqueryProject<P extends ISubqueryProject>(
        * nestjs scheduler reflecting and being unable to get props.
        * If we can fix that then we can move this above the project accessors
        */
-      if (target[prop as keyof IProjectUpgradeService<P>] /*(serviceKeys as Array<string | symbol>).includes(prop)*/) {
+      if (prop in target /*(serviceKeys as Array<string | symbol>).includes(prop)*/) {
         const result = target[prop as keyof IProjectUpgradeService<P>];
 
         if (result instanceof Function) {
@@ -79,35 +103,47 @@ export function upgradableSubqueryProject<P extends ISubqueryProject>(
   });
 }
 
-export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject> implements IProjectUpgradeService<P> {
+export class ProjectUpgradeService<P extends ISubqueryProject = ISubqueryProject> implements IProjectUpgradeService<P> {
   #currentHeight: number;
   #currentProject: P;
 
-  #metadata?: CacheMetadataModel;
-
+  #modelProvider?: IStoreModelProvider;
+  #sequelize?: Sequelize;
   #initialized = false;
 
+  private config?: NodeConfig;
   private onProjectUpgrade?: OnProjectUpgradeCallback<P>;
+  private migrationService?: SchemaMigrationService;
 
-  private constructor(private _projects: BlockHeightMap<P>, currentHeight: number) {
+  private constructor(
+    private _projects: BlockHeightMap<P>,
+    currentHeight: number,
+    private _isRewindable = true
+  ) {
     logger.info(
       `Projects: ${JSON.stringify(
-        [..._projects.getAll().entries()].reduce((acc, curr) => {
-          acc[curr[0]] = curr[1].id;
-          return acc;
-        }, {} as Record<number, string>),
+        [..._projects.getAll().entries()].reduce(
+          (acc, curr) => {
+            acc[curr[0]] = curr[1].id;
+            return acc;
+          },
+          {} as Record<number, string>
+        ),
         undefined,
         2
       )}`
     );
-
     // Bypass setters here because we want to avoid side-effect
     this.#currentHeight = currentHeight;
     this.#currentProject = this.getProject(this.#currentHeight);
   }
 
   async init(
-    metadata: CacheMetadataModel,
+    storeService: StoreService,
+    currentHeight: number,
+    config: NodeConfig,
+    sequelize: Sequelize,
+    schema: string,
     onProjectUpgrade?: OnProjectUpgradeCallback<P>
   ): Promise<number | undefined> {
     if (this.#initialized) {
@@ -115,18 +151,34 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
       return;
     }
     this.#initialized = true;
-    this.#metadata = metadata;
-    this.onProjectUpgrade = onProjectUpgrade;
+    this.#modelProvider = storeService.modelProvider;
+    this.config = config;
+    this.#sequelize = sequelize;
+
+    this.migrationService = new SchemaMigrationService(sequelize, storeService, schema, config);
 
     const indexedDeployments = await this.getDeploymentsMetadata();
 
     const lastProjectChange = this.validateIndexedData(indexedDeployments);
 
-    if (lastProjectChange) {
-      this.#currentHeight = lastProjectChange;
+    this.#currentHeight = lastProjectChange || currentHeight;
+
+    try {
       this.#currentProject = this.getProject(this.#currentHeight);
+    } catch (e: any) {
+      if (e instanceof EntryNotFoundError) {
+        throw new Error(
+          `Unable to find project for height ${
+            this.#currentHeight
+          }. If the project start height is increased it will not jump to that block. Please either reindex or specify blocks to bypass.`,
+          {cause: e}
+        );
+      }
+      throw e;
     }
 
+    // executed last to ensure that the correct project is set first
+    this.onProjectUpgrade = onProjectUpgrade;
     return lastProjectChange;
   }
 
@@ -135,6 +187,10 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
     this.#currentHeight = currentHeight;
     this.#currentProject = this.getProject(this.#currentHeight);
     this.onProjectUpgrade = onProjectUpgrade;
+  }
+
+  get isRewindable(): boolean {
+    return this._isRewindable;
   }
 
   get projects(): Map<number, P> {
@@ -149,6 +205,65 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
     return this.#currentHeight;
   }
 
+  private get metadata(): IMetadata {
+    assert(
+      this.#modelProvider?.metadata,
+      'Project Upgrades service has not been initialized, unable to update metadata'
+    );
+    return this.#modelProvider.metadata;
+  }
+
+  async rewind(
+    targetBlockHeight: number,
+    lastProcessedHeight: number,
+    transaction: Transaction,
+    storeService: StoreService
+  ): Promise<void> {
+    const projectsWithinRange = new BlockHeightMap(this.projects).getWithinRange(
+      targetBlockHeight,
+      lastProcessedHeight
+    );
+    const sortedProjectIds = Array.from(projectsWithinRange.keys());
+    const iterator = sortedProjectIds[Symbol.iterator]();
+
+    let currentId = iterator.next();
+    let nextId = iterator.next();
+
+    while (!currentId.done && !nextId.done) {
+      const currentProject = projectsWithinRange.get(currentId.value);
+      const nextProject = projectsWithinRange.get(nextId.value);
+
+      if (currentProject && nextProject) {
+        if (this.config?.dbSchema) {
+          await storeService.init(this.config.dbSchema, transaction);
+        }
+        await this.migrate(currentProject, nextProject, transaction);
+      }
+
+      currentId = nextId;
+      nextId = iterator.next();
+    }
+    // this remove any deployments in metadata beyond target height
+    await this.removeIndexedDeployments(targetBlockHeight, transaction);
+  }
+
+  private async migrate(
+    project: ISubqueryProject,
+    newProject: ISubqueryProject,
+    transaction: Transaction
+  ): Promise<void> {
+    assert(this.config, 'NodeConfig is undefined');
+    assert(this.migrationService, 'MigrationService is undefined');
+    if (this.config.allowSchemaMigration) {
+      await this.migrationService.run(project.schema, newProject.schema, transaction);
+      await this.metadata.setIncrement('schemaMigrationCount', undefined, transaction);
+    }
+  }
+
+  /**
+   * Sets the current project and handles project changes
+   * Project change effects only happen after init has been called
+   * */
   async setCurrentHeight(height: number): Promise<void> {
     this.#currentHeight = height;
     const newProjectDetails = this._projects.getDetails(height);
@@ -157,27 +272,35 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
 
     const hasChanged = this.#currentProject !== newProject;
     // Need to set this so that operations under hasChanged use the new project
+    const project = this.#currentProject;
     this.#currentProject = newProject;
 
-    if (hasChanged) {
+    if (hasChanged && this.#initialized) {
       if (isMainThread) {
         try {
-          // Use the project start height here for when resuming indexing at an arbitrary height
           await this.updateIndexedDeployments(newProject.id, startHeight);
         } catch (e: any) {
-          logger.error(e, 'Failed to update deployment metadata');
-          process.exit(1);
+          logger.error(e, 'Failed to update deployment');
+          throw new Error(`Failed to update deployment`, {cause: e});
         }
       }
 
       try {
         await this.onProjectUpgrade?.(startHeight, newProject);
+        if (isMainThread) {
+          if (!this.#sequelize) {
+            throw new Error('Sequelize is not available to run migration');
+          }
+          const tx = await this.#sequelize.transaction();
+          await this.migrate(project, newProject, tx);
+          await tx.commit();
+        }
       } catch (e: any) {
-        logger.error(e, `Failed to complete upgrading project`);
-        process.exit(1);
+        exitWithError(new Error(`Failed to complete upgrading project`, {cause: e}), logger, 1);
       }
-
-      logger.info(`Project upgraded to ${newProject.id} at height ${height}`);
+      const msg = `Project upgraded to ${newProject.id} at height ${height}`;
+      monitorWrite(msg);
+      logger.info(msg);
     }
   }
 
@@ -185,13 +308,18 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
     startProject: P, // The project passed in via application start
     loadProject: (ipfsCid: string) => Promise<P>,
     startHeight?: number // How far back we need to load parent versions
-  ): Promise<ProjectUpgradeSevice<P>> {
+  ): Promise<ProjectUpgradeService<P>> {
     const projects: Map<number, P> = new Map();
 
     let currentProject = startProject;
     let currentHeight: number | undefined;
 
+    let nextProject = startProject;
+
     const addProject = (height: number, project: P) => {
+      if (projects.has(height)) {
+        throw new Error(`Project already exists at height ${height}`);
+      }
       this.validateProject(startProject, project);
       projects.set(height, project);
     };
@@ -202,7 +330,7 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
 
       // Set the current height to the start of the startProject if not provided
       if (currentHeight === undefined) {
-        currentHeight = startProject.parent?.block ?? projectStartHeight;
+        currentHeight = (startProject.parent && getParentBlock(startProject.parent)) ?? projectStartHeight;
       }
 
       // At the end of the chain
@@ -214,19 +342,19 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
         addProject(projectStartHeight, currentProject);
         break;
       }
-      if (currentProject.parent.block) {
-        addProject(currentProject.parent.block, currentProject);
+      if (currentProject.parent && getParentBlock(currentProject.parent)) {
+        addProject(getParentBlock(currentProject.parent), currentProject);
       }
       // At the limit of the start height for Parent
-      if (startHeight !== undefined && startHeight >= currentProject.parent.block) {
+      if (startHeight !== undefined && startHeight >= getParentBlock(currentProject.parent)) {
         break;
       }
 
       // Load the next project and repeat
-      const nextProject = await loadProject(currentProject.parent.reference).catch((e) => {
+      nextProject = await loadProject(currentProject.parent.reference).catch((e) => {
         throw new Error(`Failed to load parent project with cid: ${currentProject.parent?.reference}. ${e}`);
       });
-      if (nextProject.parent && nextProject.parent.block > currentProject.parent.block) {
+      if (nextProject.parent && getParentBlock(nextProject.parent) > getParentBlock(currentProject.parent)) {
         throw new Error(
           `Parent project ${currentProject.parent.reference} has a block height that is greater than the current project`
         );
@@ -238,12 +366,29 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
       throw new Error('No valid projects found, this could be due to the startHeight.');
     }
 
-    assert(currentHeight, 'Unable to determine current height from projects');
-    return new ProjectUpgradeSevice(new BlockHeightMap(projects), currentHeight);
+    const isRewindable = this.rewindableCheck(projects);
+
+    const firstProjectHeight = Math.min(...projects.keys());
+    return new ProjectUpgradeService(new BlockHeightMap(projects), firstProjectHeight, isRewindable);
   }
 
   getProject(height: number): P {
     return this._projects.get(height);
+  }
+
+  private static rewindableCheck<P extends ISubqueryProject>(projects: Map<number, P>): boolean {
+    const sortedProjects = new Map([...projects.entries()].sort((a, b) => a[0] - b[0]));
+    const projectIterator = sortedProjects.values();
+    let previousProject = projectIterator.next().value;
+    if (previousProject) {
+      for (const project of projectIterator) {
+        if (!SchemaMigrationService.validateSchemaChanges(previousProject.schema, project.schema)) {
+          return false;
+        }
+        previousProject = project;
+      }
+    }
+    return true;
   }
 
   private static validateProject<P extends ISubqueryProject>(startProject: P, parentProject: P): void {
@@ -255,7 +400,7 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
 
   // Returns a height to rewind to if rewind is needed. Otherwise throws an error
   validateIndexedData(deploymentsMetadata: Record<number, string>): number | undefined {
-    // Using project upgades feature
+    // Using project upgrades feature
     if (this.projects.size > 1) {
       const indexedEntries = Object.entries(deploymentsMetadata);
       const projectEntries: [number, string][] = [...this.projects.entries()].map(([height, project]) => [
@@ -285,8 +430,7 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
   }
 
   private async getDeploymentsMetadata(): Promise<Record<number, string>> {
-    assert(this.#metadata, 'Project Upgrades service has not been initialized, unable to update metadata');
-    const deploymentsRaw = await this.#metadata.find('deployments');
+    const deploymentsRaw = await this.metadata.find('deployments');
 
     if (!deploymentsRaw) return {};
 
@@ -295,7 +439,6 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
 
   @mainThreadOnly()
   async updateIndexedDeployments(id: string, blockHeight: number): Promise<void> {
-    assert(this.#metadata, 'Project Upgrades service has not been initialized, unable to update metadata');
     const deployments = await this.getDeploymentsMetadata();
 
     // If the last deployment is the same as the one we're updating to theres no need to do anything
@@ -313,6 +456,22 @@ export class ProjectUpgradeSevice<P extends ISubqueryProject = ISubqueryProject>
 
     deployments[blockHeight] = id;
 
-    this.#metadata.set('deployments', JSON.stringify(deployments));
+    await this.metadata.set('deployments', JSON.stringify(deployments));
+  }
+
+  // Remove metadata deployments beyond this blockHeight
+  async removeIndexedDeployments(blockHeight: number, tx?: Transaction): Promise<void> {
+    const deployments = await this.getDeploymentsMetadata();
+
+    // remove all future block heights
+    Object.keys(deployments).forEach((key) => {
+      const keyNum = parseInt(key, 10);
+      // NOTE, this is different with `updateIndexedDeployments`, deployment > will be deleted
+      if (keyNum > blockHeight) {
+        delete deployments[keyNum];
+      }
+    });
+
+    await this.metadata.set('deployments', JSON.stringify(deployments), tx);
   }
 }

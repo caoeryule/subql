@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {existsSync, readFileSync} from 'fs';
@@ -8,10 +8,12 @@ import {Cache, Store} from '@subql/types-core';
 import {levelFilter} from '@subql/utils';
 import {last, merge} from 'lodash';
 import {SourceMapConsumer, NullableMappedPosition} from 'source-map';
-import {NodeVM, NodeVMOptions, VMScript} from 'vm2';
+import {NodeVM, NodeVMOptions, VMError, VMScript} from 'vm2';
 import {NodeConfig} from '../configure/NodeConfig';
 import {getLogger} from '../logger';
-import {timeout} from '../utils';
+import {timeout} from '../utils/promise';
+
+export const SANDBOX_DEFAULT_BUILTINS = ['assert', 'buffer', 'crypto', 'util', 'path', 'url', 'stream'];
 
 export interface SandboxOption {
   cache?: Cache;
@@ -19,15 +21,17 @@ export interface SandboxOption {
   root: string;
   entry: string;
   chainId: string;
+  envConfig?: Record<string, string>;
 }
 
 const DEFAULT_OPTION = (unsafe = false): NodeVMOptions => {
   return {
     console: 'redirect',
     wasm: unsafe,
-    sandbox: {},
+    // TextEncoder was added for Starknet but the reason is unknown. This caused issues with Polkadot so has been disabled.
+    sandbox: {atob /*, TextEncoder*/},
     require: {
-      builtin: unsafe ? ['*'] : ['assert', 'buffer', 'crypto', 'util', 'path', 'url'],
+      builtin: unsafe ? ['*'] : SANDBOX_DEFAULT_BUILTINS,
       external: true,
       context: 'sandbox',
     },
@@ -41,9 +45,13 @@ const logger = getLogger('sandbox');
 export class Sandbox extends NodeVM {
   private root: string;
   private entry: string;
-  private sourceMap: any | undefined;
+  private sourceMap: any;
 
-  constructor(option: SandboxOption, protected readonly script: VMScript, protected config: NodeConfig) {
+  constructor(
+    option: SandboxOption,
+    protected readonly script: VMScript,
+    protected config: NodeConfig
+  ) {
     super(
       merge(DEFAULT_OPTION(config.unsafe), {
         require: {
@@ -62,6 +70,11 @@ export class Sandbox extends NodeVM {
 
     this.freeze(option.chainId, 'chainId');
 
+    // Inject environment variables if provided
+    if (option.envConfig) {
+      this.freeze({env: option.envConfig}, 'process');
+    }
+
     const sourceMapFile = path.join(this.root, this.entry);
 
     if (existsSync(sourceMapFile)) {
@@ -70,11 +83,28 @@ export class Sandbox extends NodeVM {
   }
 
   async runTimeout<T = unknown>(duration: number): Promise<T> {
-    return timeout(
-      this.run(this.script),
-      duration,
-      `Sandbox execution timeout in ${duration} seconds. Please increase --timeout`
-    );
+    try {
+      return await timeout(
+        this.run(this.script),
+        duration,
+        `Sandbox execution timeout in ${duration} seconds. Please increase --timeout`
+      );
+    } catch (e) {
+      const msgPart = 'Cannot find module ';
+      if (e instanceof VMError && e.message.includes(msgPart)) {
+        const err = new Error(
+          `Unable to resolve module ${e.message.replace(
+            msgPart,
+            ''
+          )}. To resolve this you can either:\n\tNarrow your import. e.g Instead of "import { BigNumber } from 'ethers'" you can use "import {BigNumber} from '@ethersproject/bignumber';"\n\tEnable the --unsafe flag.`,
+          {cause: e}
+        );
+        // Copy the stack so that the logged error is more useful
+        err.stack = e.stack;
+        throw err;
+      }
+      throw e;
+    }
   }
 
   protected async convertStack(stackTrace: string | undefined): Promise<string | undefined> {
@@ -103,7 +133,12 @@ export class Sandbox extends NodeVM {
 
   decodeSourceMap(sourceMapPath: string): any {
     const source = readFileSync(sourceMapPath).toString();
-    const sourceMapBase64 = source.split(`//# sourceMappingURL=data:application/json;charset=utf-8;base64,`)[1];
+    // Projects built with old @subql/cli with webpack
+    let sourceMapBase64 = source.split(`//# sourceMappingURL=data:application/json;charset=utf-8;base64,`)[1];
+    if (!sourceMapBase64) {
+      // Projects built with @subql/cli with esbuild
+      sourceMapBase64 = source.split('//# sourceMappingURL=data:application/json;base64,')[1];
+    }
     if (!sourceMapBase64) {
       logger.warn('Unable to find a source map for project');
       logger.warn('Build your project with latest @subql/cli to generate a source map');
@@ -115,13 +150,11 @@ export class Sandbox extends NodeVM {
     return json;
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async findLineInfo(
     sourcemap: any,
     compiledLineNumber: number,
     compiledColumnNumber: number
   ): Promise<NullableMappedPosition> {
-    // eslint-disable-next-line @typescript-eslint/await-thenable
     const consumer = await new SourceMapConsumer(sourcemap);
     const lineInfo = consumer.originalPositionFor({line: compiledLineNumber, column: compiledColumnNumber});
 
@@ -153,7 +186,7 @@ export class IndexerSandbox extends Sandbox {
     try {
       await this.runTimeout(this.config.timeout);
     } catch (e: any) {
-      const newStack = await this.convertStack((e as Error).stack);
+      const newStack = await this.convertStack(e.stack);
       e.stack = newStack;
       e.handler = funcName;
       if (this.config.logLevel && levelFilter('debug', this.config.logLevel)) {
@@ -189,9 +222,12 @@ export class TestSandbox extends Sandbox {
     this.injectGlobals(option);
   }
 
-  private injectGlobals({store}: SandboxOption) {
+  private injectGlobals({envConfig, store}: SandboxOption) {
     if (store) {
       this.freeze(store, 'store');
+    }
+    if (envConfig) {
+      this.freeze({env: envConfig}, 'process');
     }
     this.freeze(logger, 'logger');
   }

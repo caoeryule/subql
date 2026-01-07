@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import gql from 'graphql-tag';
@@ -89,6 +89,32 @@ describe('utils that handle schema.graphql', () => {
       const schema = buildSchemaFromDocumentNode(graphqlSchema);
       getAllEntitiesRelations(schema);
     }).toThrow(/Not support/);
+  });
+
+  it('can create an enum with an index', () => {
+    const graphqlSchema = gql`
+      type Test @entity {
+        id: ID!
+        enumKind: enumResult! @index
+      }
+      enum enumResult {
+        NEWHOPE
+        EMPIRE
+        JEDI
+      }
+    `;
+
+    const schema = buildSchemaFromDocumentNode(graphqlSchema);
+    const rels = getAllEntitiesRelations(schema);
+
+    expect(rels.models[0].indexes[0]).toMatchObject({
+      fields: ['enumKind'],
+    });
+
+    // expect(() => {
+    //   const schema = buildSchemaFromDocumentNode(graphqlSchema);
+    //   getAllEntitiesRelations(schema);
+    // }).toThrow(/Not support/);
   });
 
   it('can extract nested models and relations from the schema', () => {
@@ -215,7 +241,7 @@ describe('utils that handle schema.graphql', () => {
       type Fruit @entity {
         id: ID!
         apple: Apple
-        banana: [Banana] @index(unique: true)
+        banana: [Banana] @derivedFrom(field: "fruit")
       }
       type Fruit2 @entity {
         id: ID!
@@ -226,6 +252,7 @@ describe('utils that handle schema.graphql', () => {
       }
       type Banana @entity {
         id: ID!
+        fruit: Fruit
       }
     `;
     const schema = buildSchemaFromDocumentNode(graphqlSchema);
@@ -233,7 +260,7 @@ describe('utils that handle schema.graphql', () => {
     expect(entities.models?.[0].indexes[0].fields).toEqual(['appleId']);
     expect(entities.models?.[0].indexes[0].using).toEqual('hash');
     expect(entities.models?.[0].indexes[0].unique).toBe(false);
-    expect(entities.models?.[0].indexes[1].unique).toBe(true);
+
     expect(entities.models?.[1].indexes[0].fields).toEqual(['appleId']);
     expect(entities.models?.[1].indexes[0].unique).toBe(false);
   });
@@ -250,18 +277,19 @@ describe('utils that handle schema.graphql', () => {
       }
       type Account @entity {
         field6: [MyJson]!
+        id: ID!
       }
     `;
     const schema = buildSchemaFromDocumentNode(graphqlSchema);
     const accountModel = getAllEntitiesRelations(schema).models.find((model) => model.name === 'Account');
-    expect(accountModel.fields[0].type).toBe('Json');
-    expect(accountModel.fields[0].jsonInterface.name).toBe('MyJson');
-    expect(accountModel.fields[0].isArray).toBeTruthy();
-    expect(accountModel.fields[0].jsonInterface.fields[0].nullable).toBeFalsy();
-    expect(accountModel.fields[0].jsonInterface.fields[1].isArray).toBeTruthy();
+    expect(accountModel?.fields[0].type).toBe('Json');
+    expect(accountModel?.fields[0].jsonInterface?.name).toBe('MyJson');
+    expect(accountModel?.fields[0].isArray).toBeTruthy();
+    expect(accountModel?.fields[0].jsonInterface?.fields[0].nullable).toBeFalsy();
+    expect(accountModel?.fields[0].jsonInterface?.fields[1].isArray).toBeTruthy();
     // allow json in json
-    expect(accountModel.fields[0].jsonInterface.fields[2].type).toBe('Json');
-    expect(accountModel.fields[0].jsonInterface.fields[2].jsonInterface.name).toBe('MyJson2');
+    expect(accountModel?.fields[0].jsonInterface?.fields[2].type).toBe('Json');
+    expect(accountModel?.fields[0].jsonInterface?.fields[2].jsonInterface?.name).toBe('MyJson2');
   });
 
   it('can read jsonfield with indexed option', () => {
@@ -282,6 +310,7 @@ describe('utils that handle schema.graphql', () => {
         field1: MyJson!
         field2: MyJson2!
         field3: MyJson3!
+        id: ID!
       }
     `;
     const schema = buildSchemaFromDocumentNode(graphqlSchema);
@@ -363,5 +392,147 @@ describe('utils that handle schema.graphql', () => {
     expect(() => getAllEntitiesRelations(schema)).toThrow(
       /Composite index on entity StarterEntity expected not more than 3 fields,/
     );
+  });
+
+  it('can read fulltext directive', () => {
+    const graphqlSchema = gql`
+      type StarterEntity @entity @fullText(fields: ["field2", "field3"], language: "english") {
+        id: ID! #id is a required field
+        field1: Int!
+        field2: String #field2 is an optional field
+        field3: String
+      }
+    `;
+
+    const schema = buildSchemaFromDocumentNode(graphqlSchema);
+    const entities = getAllEntitiesRelations(schema);
+
+    expect(entities.models?.[0].fullText?.fields).toEqual(['field2', 'field3']);
+  });
+
+  it('can throw fulltext directive when field doesnt exist on entity', () => {
+    const graphqlSchema = gql`
+      type StarterEntity @entity @fullText(fields: ["field2", "not_exists"], language: "english") {
+        id: ID! #id is a required field
+        field1: Int!
+        field2: String #field2 is an optional field
+        field3: String
+      }
+    `;
+
+    const schema = buildSchemaFromDocumentNode(graphqlSchema);
+    expect(() => getAllEntitiesRelations(schema)).toThrow(
+      `Field "not_exists" in fullText directive doesn't exist on entity "StarterEntity"`
+    );
+  });
+
+  it('can throw fulltext directive when field isnt a string', () => {
+    const graphqlSchema = gql`
+      type StarterEntity @entity @fullText(fields: ["field1"], language: "english") {
+        id: ID! #id is a required field
+        field1: Int!
+        field2: String #field2 is an optional field
+        field3: String
+      }
+    `;
+
+    const schema = buildSchemaFromDocumentNode(graphqlSchema);
+    expect(() => getAllEntitiesRelations(schema)).toThrow(`fullText directive fields only supports String types`);
+  });
+
+  it('will throw if entity missing id field', () => {
+    const graphqlSchema = gql`
+      type StarterEntity @entity {
+        field1: Int!
+        field2: String #field2 is an optional field
+        field3: String
+      }
+    `;
+
+    const schema = buildSchemaFromDocumentNode(graphqlSchema);
+    expect(() => getAllEntitiesRelations(schema)).toThrow(`Entity "StarterEntity" is missing required id field.`);
+  });
+
+  it('will throw if entity id field isnt id', () => {
+    const graphqlSchema = gql`
+      type StarterEntity @entity {
+        id: Int!
+        field1: Int!
+        field2: String #field2 is an optional field
+        field3: String
+      }
+    `;
+
+    const schema = buildSchemaFromDocumentNode(graphqlSchema);
+    expect(() => getAllEntitiesRelations(schema)).toThrow(`Entity "StarterEntity" type must be ID, received Int`);
+  });
+
+  it('will throw if 1 to Many relationship is missing directive', () => {
+    const graphqlSchema = gql`
+      type Fruit @entity {
+        id: ID!
+        bananas: [Banana!]!
+      }
+      type Banana @entity {
+        id: ID!
+      }
+    `;
+
+    const schema = buildSchemaFromDocumentNode(graphqlSchema);
+    expect(() => getAllEntitiesRelations(schema)).toThrow(
+      `Field "bananas" on entity "Fruit" is missing "derivedFrom" directive. Please also make sure "Banana" has a field of type "Fruit".`
+    );
+  });
+
+  describe('dbType directive', () => {
+    it('allows overriding the default ID type', () => {
+      const graphqlSchema = gql`
+        type StarterEntity @entity {
+          id: ID! @dbType(type: "Int")
+        }
+      `;
+
+      const schema = buildSchemaFromDocumentNode(graphqlSchema);
+      const entityRelations = getAllEntitiesRelations(schema);
+      const model = entityRelations.models.find((m) => m.name === 'StarterEntity');
+
+      expect(model).toBeDefined();
+      expect(model?.fields[0].type).toEqual('Int');
+    });
+
+    it('doesnt allow the directive on fields other than id', () => {
+      const graphqlSchema = gql`
+        type StarterEntity @entity {
+          id: ID!
+          field1: Date @dbType(type: "Int")
+        }
+      `;
+
+      const schema = buildSchemaFromDocumentNode(graphqlSchema);
+      expect(() => getAllEntitiesRelations(schema)).toThrow(
+        `dbType directive can only be added on 'id' field, received: field1`
+      );
+    });
+
+    it('only allows predefined ID db types', () => {
+      const makeSchema = (type: string) =>
+        buildSchemaFromDocumentNode(gql`
+        type StarterEntity @entity {
+          id: ID! @dbType(type: "${type}")
+        }
+      `);
+
+      for (const type of ['BigInt', 'Int', 'Float', 'ID', 'String']) {
+        const schema = makeSchema(type);
+        expect(() => getAllEntitiesRelations(schema)).not.toThrow();
+      }
+
+      for (const type of ['JSON', 'Date', 'Bytes', 'Boolean', 'StarterEntity']) {
+        const schema = makeSchema(type);
+        expect(() => getAllEntitiesRelations(schema)).toThrow(
+          `${type} is not a defined scalar type, please use another type in the dbType directive.\nAvailable types: BigInt, Float, ID, Int, String`
+        );
+      }
+    });
   });
 });

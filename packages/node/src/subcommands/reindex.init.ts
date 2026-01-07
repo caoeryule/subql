@@ -1,30 +1,22 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import { NestFactory } from '@nestjs/core';
-import { getLogger, ReindexService } from '@subql/node-core';
-import { ReindexModule } from './reindex.module';
+import { Module } from '@nestjs/common';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { reindexInit as baseReindexInit, DbModule } from '@subql/node-core';
+import { ConfigureModule } from '../configure/configure.module';
+import { ReindexFeatureModule } from './reindex.module';
 
-const logger = getLogger('CLI-Reindex');
-export async function reindexInit(targetHeight: number): Promise<void> {
-  try {
-    const app = await NestFactory.create(ReindexModule);
+@Module({
+  imports: [
+    DbModule.forRoot(),
+    ConfigureModule.register(),
+    ReindexFeatureModule,
+    EventEmitterModule.forRoot(),
+  ],
+  controllers: [],
+})
+export class ReindexModule {}
 
-    await app.init();
-    const reindexService = app.get(ReindexService);
-
-    await reindexService.init();
-    const actualReindexHeight =
-      await reindexService.getTargetHeightWithUnfinalizedBlocks(targetHeight);
-    if (actualReindexHeight !== targetHeight) {
-      logger.info(
-        `Found index target height ${targetHeight} beyond indexed unfinalized block ${actualReindexHeight}, will index to ${actualReindexHeight}`,
-      );
-    }
-    await reindexService.reindex(actualReindexHeight);
-  } catch (e) {
-    logger.error(e, 'Reindex failed to execute');
-    process.exit(1);
-  }
-  process.exit(0);
-}
+export const reindexInit = (targetHeight: number): Promise<void> =>
+  baseReindexInit(ReindexModule, targetHeight);

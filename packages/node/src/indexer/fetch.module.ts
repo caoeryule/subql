@@ -1,153 +1,105 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import path from 'path';
 import { Module } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
-  PoiBenchmarkService,
-  IndexingBenchmarkService,
   StoreService,
-  PoiService,
   NodeConfig,
-  ConnectionPoolService,
-  SmartBatchService,
-  StoreCacheService,
   ConnectionPoolStateManager,
-  IProjectUpgradeService,
   PoiSyncService,
   InMemoryCacheService,
+  MonitorService,
+  CoreModule,
+  ConnectionPoolService,
+  UnfinalizedBlocksService,
+  DsProcessorService,
+  ProjectService,
+  DynamicDsService,
+  FetchService,
+  DictionaryService,
+  MultiChainRewindService,
+  blockDispatcherFactory,
 } from '@subql/node-core';
-import { SubqueryProject } from '../configure/SubqueryProject';
+import { SubstrateDatasource } from '@subql/types';
+import { BlockchainService } from '../blockchain.service';
 import { ApiService } from './api.service';
 import { ApiPromiseConnection } from './apiPromise.connection';
-import {
-  BlockDispatcherService,
-  WorkerBlockDispatcherService,
-} from './blockDispatcher';
-import { DictionaryService } from './dictionary.service';
-import { DsProcessorService } from './ds-processor.service';
-import { DynamicDsService } from './dynamic-ds.service';
-import { FetchService } from './fetch.service';
+import { SubstrateDictionaryService } from './dictionary/substrateDictionary.service';
 import { IndexerManager } from './indexer.manager';
-import { ProjectService } from './project.service';
 import { RuntimeService } from './runtime/runtimeService';
-import { SandboxService } from './sandbox.service';
-import { UnfinalizedBlocksService } from './unfinalizedBlocks.service';
+import { BlockContent, LightBlockContent } from './types';
+import { IIndexerWorker } from './worker/worker';
 
 @Module({
+  imports: [CoreModule],
   providers: [
-    InMemoryCacheService,
-    StoreService,
-    StoreCacheService,
-    ApiService,
-    IndexerManager,
-    ConnectionPoolStateManager,
     {
-      provide: SmartBatchService,
-      useFactory: (nodeConfig: NodeConfig) => {
-        return new SmartBatchService(nodeConfig.batchSize);
-      },
-      inject: [NodeConfig],
+      provide: 'APIService',
+      useFactory: ApiService.init,
+      inject: [
+        'ISubqueryProject',
+        ConnectionPoolService,
+        EventEmitter2,
+        NodeConfig,
+      ],
     },
     {
+      provide: 'RuntimeService',
+      useClass: RuntimeService,
+    },
+    {
+      provide: 'IBlockchainService',
+      useClass: BlockchainService,
+    },
+    DsProcessorService,
+    DynamicDsService,
+    {
+      provide: 'IUnfinalizedBlocksService',
+      useClass: UnfinalizedBlocksService,
+    },
+    {
+      useClass: ProjectService,
+      provide: 'IProjectService',
+    },
+    MultiChainRewindService,
+    IndexerManager,
+    {
       provide: 'IBlockDispatcher',
-      useFactory: (
-        nodeConfig: NodeConfig,
-        eventEmitter: EventEmitter2,
-        projectService: ProjectService,
-        projectUpgradeService: IProjectUpgradeService,
-        apiService: ApiService,
-        indexerManager: IndexerManager,
-        smartBatchService: SmartBatchService,
-        cacheService: InMemoryCacheService,
-        storeService: StoreService,
-        storeCacheService: StoreCacheService,
-        poiSyncService: PoiSyncService,
-        project: SubqueryProject,
-        dynamicDsService: DynamicDsService,
-        unfinalizedBlocks: UnfinalizedBlocksService,
-        connectionPoolState: ConnectionPoolStateManager<ApiPromiseConnection>,
-      ) =>
-        nodeConfig.workers !== undefined
-          ? new WorkerBlockDispatcherService(
-              nodeConfig,
-              eventEmitter,
-              projectService,
-              projectUpgradeService,
-              smartBatchService,
-              cacheService,
-              storeService,
-              storeCacheService,
-              poiSyncService,
-              project,
-              dynamicDsService,
-              unfinalizedBlocks,
-              connectionPoolState,
-            )
-          : new BlockDispatcherService(
-              apiService,
-              nodeConfig,
-              indexerManager,
-              eventEmitter,
-              projectService,
-              projectUpgradeService,
-              smartBatchService,
-              storeService,
-              storeCacheService,
-              poiSyncService,
-              project,
-              dynamicDsService,
-            ),
+      useFactory: blockDispatcherFactory<
+        SubstrateDatasource,
+        BlockContent | LightBlockContent,
+        ApiPromiseConnection,
+        IIndexerWorker
+      >(path.resolve(__dirname, '../../dist/indexer/worker/worker.js'), [
+        'syncRuntimeService',
+        'getSpecFromMap',
+      ]),
       inject: [
         NodeConfig,
         EventEmitter2,
         'IProjectService',
         'IProjectUpgradeService',
-        ApiService,
-        IndexerManager,
-        SmartBatchService,
         InMemoryCacheService,
         StoreService,
-        StoreCacheService,
+        'IStoreModelProvider',
         PoiSyncService,
         'ISubqueryProject',
         DynamicDsService,
-        UnfinalizedBlocksService,
+        'IUnfinalizedBlocksService',
         ConnectionPoolStateManager,
+        'IBlockchainService',
+        IndexerManager,
+        MultiChainRewindService,
+        MonitorService,
       ],
     },
-    FetchService,
-    ConnectionPoolService,
-    IndexingBenchmarkService,
-    PoiBenchmarkService,
     {
       provide: DictionaryService,
-      useFactory: async (
-        project: SubqueryProject,
-        nodeConfig: NodeConfig,
-        eventEmitter: EventEmitter2,
-      ) => {
-        const dictionaryService = await DictionaryService.create(
-          project,
-          nodeConfig,
-          eventEmitter,
-        );
-        return dictionaryService;
-      },
-      inject: ['ISubqueryProject', NodeConfig, EventEmitter2],
+      useClass: SubstrateDictionaryService,
     },
-    SandboxService,
-    DsProcessorService,
-    DynamicDsService,
-    PoiService,
-    PoiSyncService,
-    {
-      useClass: ProjectService,
-      provide: 'IProjectService',
-    },
-    UnfinalizedBlocksService,
-    RuntimeService,
+    FetchService,
   ],
-  exports: [StoreService, StoreCacheService],
 })
 export class FetchModule {}

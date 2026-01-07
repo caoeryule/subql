@@ -6,6 +6,401 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.4.6] - 2025-11-26
+### Fixed
+- skipTransactions combined with workers throwing an error getting the block timestamp (#2978)
+
+## [6.4.5] - 2025-11-25
+### Fixed
+- Updating models updateOnDuplicate field being calculated incorrectly (#2976)
+
+## [6.4.4] - 2025-11-20
+### Fixed
+- POI issues with array fields (#2972)
+
+## [6.4.3] - 2025-11-05
+### Fixed
+- Lock down VM2 version to avoid a breaking change (#2959)
+
+## [6.4.2] - 2025-10-22
+### Changed
+- Update `@subql/common-substrate`
+
+## [6.4.0] - 2025-10-15
+### Changed
+- Minor improvements and fixes from upgrading to eslint 9 with stricter settings (#2929)
+
+## [6.3.5] - 2025-09-16
+### Changed
+- Locked down graphql related dependencies (#2876)
+- Update polkadot dependenices (#2915)
+
+## [6.3.4] - 2025-09-09
+### Fixed
+- Dictionary v2 being used with empty filter conditions (#2909)
+
+## [6.3.3] - 2025-07-30
+### Fixed
+- Indexes not being checked correctly (#2871)
+
+## [6.3.2] - 2025-07-24
+### Changed
+- Improved docker image size (#2866)
+
+## [6.3.1] - 2025-07-17
+### Changed
+- Workspace dependencies now match to patch versions rather than exact (#2855)
+
+## [6.3.0] - 2025-07-14
+### Changed
+- Update to `@polkadot/api@^16`. Note there are breaking changes to metadata, please see the polkadot changelog for more information. (#2845)
+
+## [6.2.0] - 2025-07-01
+### Removed
+- Test files and artifacts from published package (#2838)
+
+## [6.1.1] - 2025-06-25
+### Changed
+- Update reflect-metadata dependency (#2826)
+
+## [6.1.0] - 2025-05-21
+### Added
+- Support for adding new enum values in migrations
+
+## [6.0.5] - 2025-05-20
+### Fixed
+- Missing dependency for testing subcommand (#2795)
+
+## [6.0.4] - 2025-05-08
+### Changed
+- Update `@subql/node-core`
+
+## [6.0.3] - 2025-04-30
+### Fixed
+- Regression with workers leading to bad performance (#2771)
+
+## [6.0.2] - 2025-04-24
+### Changed
+- Don't inject MultichainRewindService in workers (#2758)
+
+## [6.0.1] - 2025-04-24
+### Changed
+- Enable unfinalized blocks by default when historical indexing is enabled (#2755)
+- Update polkadot dependencies
+
+## [6.0.0] - 2025-04-16
+### Added
+- Support multi chain project reindex
+
+## [5.11.2] - 2025-04-08
+### Changed
+- Bump `@subql/node-core`
+
+## [5.11.1] - 2025-03-24
+### Fixed
+- Max queue size error with workers (#2725)
+
+## [5.11.0] - 2025-03-20
+### Fixed
+- Testing not updating test results correctly if fetching block fails (#2716)
+
+## [5.10.0] - 2025-03-05
+### Changed
+- Update `@subql/node-core` with new cache flush behaviour when fully synced (#2707)
+
+## [5.9.1] - 2025-02-26
+### Changed
+- Use blockDispatcherFactory from node-core (#2701)
+
+## [5.9.0] - 2025-02-25
+### Changed
+- Bump `@subql/node-core`
+
+## [5.8.0] - 2025-02-19
+### Changed
+- Update nestjs dependencies (#2667)
+- Update polkadot api to 15 (#2680)
+
+## [5.7.2] - 2025-02-04
+### Changed
+- Update copyright header to 2025
+- Implement BlockchainService and various other changes to match new node-core architecture (#2517)
+
+### Fixed
+- Various typos
+
+## [5.7.1] - 2025-01-30
+### Fixed
+- Crash with iterating extrinsics when skipTransactions is enabled (#2656)
+
+## [5.7.0] - 2025-01-28
+### Changed
+- Update node core to expose PG Pool options (#2646)
+- Remove unused SchedulerRegistry dependency with node-core changes
+
+### Added
+- Bump `@subql/node-core` dependency (#2644)
+
+## [5.6.0] - 2024-12-11
+### Changed
+- Update `@subql/node-core` with bug fixes and support for alternative ID types
+
+## [5.5.0] - 2024-12-04
+### Changed
+- Add block size function to match breaking node-core change (#2611)
+
+### Fixed
+- When the `primary-network-endpoint` flag exists, it will report an "Invalid endpoint" error.(#2612)
+
+## [5.4.2] - 2024-11-26
+### Fixed
+- Not using grouped events (#2607)
+
+## [5.4.1] - 2024-11-26
+### Fixed
+- Fix import path (#2605)
+
+## [5.4.0] - 2024-11-25
+### Changed
+- Improve event iteration, this improves performance with large blocks (#2601)
+- Update polkadot/api library to 14 version
+
+### Fixed
+- Fix part of the module.ts file that is missing the logic for injecting `IStoreModelProvider`.
+
+## [5.3.0] - 2024-11-22
+### Added
+- Support for historical indexing by timestamp as well as block height (#2584)
+
+### Added
+- Add an `--enable-cache` flag, allowing you to choose between DB or cache for IO operations.
+
+## [5.2.9] - 2024-10-30
+### Changed
+- Bump `@subql/node-core` dependency
+
+## [5.2.8] - 2024-10-23
+### Changed
+- Bump `@subql/common-substrate` dependency
+
+## [5.2.7] - 2024-10-21
+### Fixed
+- Issues with setting a large block range for bypass blocks (#2566)
+
+## [5.2.6] - 2024-09-25
+### Changed
+- Bump common, Added manifest support for query-subgraph.
+
+## [5.2.5] - 2024-09-09
+### Changed
+- Update Dependency `node-core`
+
+## [5.2.3] - 2024-08-23
+### Fixed
+- Revert rimraf version
+
+## [5.2.2] - 2024-08-14
+### Added
+- Update polkadot/api library
+
+## [5.2.1] - 2024-08-12
+### Fixed
+- Subcommands not working because of yargs dependency
+
+## [5.2.0] - 2024-08-05
+### Changed
+- Update dependencies (#2518)
+
+## [5.1.0] - 2024-08-01
+### Added
+- Support endpoint configs and specifying headers for network endpoints (#2511)
+
+### Fixed
+- Fixed timestamp can be undefined in some network blocks, it should return undefined (#2513)
+
+## [5.0.2] - 2024-07-31
+### Fixed
+- Fixed api not reloading new deployment chainTypes when project upgrades (#2505)
+
+## [5.0.1] - 2024-07-29
+### Fixed
+- Fixed default Timezone to UTC in dockerfile and package.json (#2505)
+- Bump with `node-core`, fixed various data consistency issue with db and cache (#2504)
+
+## [5.0.0] - 2024-07-25
+### Changed
+- Breaking change: Update with `@subql/node-core`, require indexing environment timezone set to UTC (#2495)
+- Update SubqueryProject to use code from node-core (#2496)
+
+### Fixed
+- Bump with `@subql/node-core`, fixed various issues causing poi inconsistency (#2497)
+
+## [4.9.0] - 2024-07-22
+### Changed
+- Tidy up modules to match changes with node-core (#2491)
+
+## [4.8.2] - 2024-07-16
+### Fixed
+- Fix dockerfile missing set timezone to UTC (#2489)
+
+## [4.8.1] - 2024-07-11
+### Removed
+- Unused type (#2484)
+
+### Changed
+- Make change with `node-core` fetch service, change `getFinalizedHeight` to `getFinalizedHeader` (#2487)
+
+## [4.8.0] - 2024-07-10
+### Changed
+- Bump with `@subql/node-core`, fix admin api `dbSize` issue
+
+## [4.7.1] - 2024-07-09
+### Added
+- Enable ts strict model
+
+### Fixed
+- "currentRuntimeVersion is undefined" error (#2475)
+
+## [4.7.0] - 2024-07-01
+### Changed
+- Update with `@subql/node-core`, `@subql/common-substrate`
+
+## [4.6.6] - 2024-06-21
+### Fixed
+- Update with common-substrate, fix `EventFilter` incorrectly extend `BlockFilter`, lead dictionary error (#2463)
+- Fix dictionary query entries included undefined fields (#2463)
+
+## [4.6.5] - 2024-06-18
+### Fixed
+- Add missing chainType validation for local mode
+
+## [4.6.4] - 2024-06-12
+### Changed
+- Update `@subql/utils`
+
+## [4.6.3] - 2024-06-12
+### Changed
+- Update polkadot dependencies to 11.2.1 (#2440)
+
+## [4.6.2] - 2024-06-06
+### Fixed
+- Fix import monitor service from node-core
+
+## [4.6.1] - 2024-06-06
+### Fixed
+- Fix import admin from node-core, update dockerfile to fix monitor default directory permission issue
+
+## [4.6.0] - 2024-06-05
+### Added
+- Add monitor service to record block indexing actions in order to improve POI accuracy, and provide debug info for Admin api
+
+## [4.5.1] - 2024-05-27
+### Fixed
+- Error processing chain types
+
+## [4.5.0] - 2024-05-22
+### Added
+- Add support to chainTypes, allow user use hasher name string in chainTypes
+
+### Fixed
+- Bump version with node-core, fix CacheModel.clear behaviour if height was 0
+
+## [4.4.2] - 2024-05-20
+### Fixed
+- Fix load chain types missing some builtins modules
+
+## [4.4.1] - 2024-05-08
+### Fixed
+- Temp disable console warn for `Unable to map [u8; 32] to a lookup index` ,until [this issue](https://github.com/polkadot-js/api/issues/5871) fixed
+
+## [4.4.0] - 2024-05-08
+### Changed
+- Update polkadot dependencies to v11
+- Bump with node-core, fix various issue with project upgrade
+
+## [4.3.2] - 2024-05-03
+### Fixed
+- Bump dependency with node-core, fix block timestamp filter could be undefined
+
+## [4.3.1] - 2024-05-02
+### Fixed
+- Bump dependency with node-core, fix failed to start issue due to missing `pg`
+
+## [4.3.0] - 2024-05-02
+### Removed
+- Unused deps (#2375)
+
+## [4.2.1] - 2024-04-29
+### Fixed
+- Startup error with DS processors (`this.isCustomDs is not a function`) (#2369)
+
+## [4.2.0] - 2024-04-24
+### Changed
+- Use code that has been moved to node core, tidy up dependencies (#2357)
+
+## [4.1.0] - 2024-04-12
+### Removed
+- Unused `@subql/testing` dependency (#2346)
+- `WorkerUnfinalizedBlocksService` and use version from node-core (#2346)
+
+### Changed
+- Update ApiService to match changes with `@subql/node-core` (#2350)
+- Simplify specVersions code (#2353)
+
+## [4.0.1] - 2024-04-05
+### Fixed
+- Fix modulo block didn't apply correctly with multiple dataSources (#2331)
+- Now when `workers` set to 0, it will use block dispatcher instead of throw and exit
+
+## [4.0.0] - 2024-03-28
+### Changed
+- Updated with node-core to support both versions of dictionaries. Now also support multiple dictionary endpoints, indexer will fetch and switch dictionaries base on available blocks (#2257)
+- Update Polkadot/api to 10.12.4
+
+### Removed
+- Special case for dictionary resolver (#2305)
+
+## [3.10.0] - 2024-03-20
+### Changed
+- Update `@subql/node-core` with fixes and optimisations
+
+## [3.9.3] - 2024-03-15
+### Changed
+- Update `@subql/node-core` to 4.7.3 with retry changes
+
+## [3.9.2] - 2024-03-14
+### Fixed
+- Escaping graphql comments (#2299)
+
+## [3.9.1] - 2024-03-08
+### Changed
+- Remove usage of deprecated type
+- Update `@subql/node-core` with bug fixes
+
+## [3.9.0] - 2024-03-05
+### Changed
+- Update `@subql/node-core` to 7.4.0
+
+## [3.6.1] - 2024-02-29
+### Fixed
+- Update `@subql/node-core` to fix Poi generation issue with negative integer, also drop subscription triggers and notifiy_functions
+
+## [3.6.0] - 2024-02-23
+### Changed
+- Update `@subql/node-core` to 7.3.0
+
+## [3.5.3] - 2024-02-07
+### Fixed
+- Critical bug introduced in 3.5.0 which broke historical indexing
+
+## [3.5.1] - 2024-01-30
+### Changed
+- Update `@subql/node-core` with updates to `@subql/apollo-links`
+
+## [3.5.0] - 2024-01-25
+### Changed
+- Update `@subql/node-core` with support for CSV exports and schema migrations
+
 ## [3.4.11] - 2024-01-10
 ### Fixed
 - Update with node-core , improve project initialization query from x-sequelize (#2212)
@@ -124,7 +519,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.0.1] - 2023-09-28
 ### Fixed
-- Fix crashes when intialization fails for one of the endpoint (#1970)
+- Fix crashes when initialization fails for one of the endpoint (#1970)
 - Remove `@willsoto/nestjs-prometheus` from dependency as it is already added in node-core (#2012)
 - Project node runner options being overwritten by yargs defaults (#1967)
 - Sync with node-core, fix dictionary resolver failed to get token issue
@@ -168,7 +563,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Sync with node-core 4.1.0:
   - moved `indexBlock` to base `TestingService` (#1913)
-  - Simplify conneciton pool logic (#1915)
+  - Simplify connection pool logic (#1915)
   - Fix poi operationHash and miss poi blocks (#1917)
 
 ## [2.10.0] - 2023-07-31
@@ -1097,7 +1492,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - bump @polkadot/api to 3.1.1
 
-[Unreleased]: https://github.com/subquery/subql/compare/node/3.4.11...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/node/6.4.6...HEAD
+[6.4.6]: https://github.com/subquery/subql/compare/node/6.4.5...node/6.4.6
+[6.4.5]: https://github.com/subquery/subql/compare/node/6.4.4...node/6.4.5
+[6.4.4]: https://github.com/subquery/subql/compare/node/6.4.3...node/6.4.4
+[6.4.3]: https://github.com/subquery/subql/compare/node/6.4.2...node/6.4.3
+[6.4.2]: https://github.com/subquery/subql/compare/node/6.4.0...node/6.4.2
+[6.4.0]: https://github.com/subquery/subql/compare/node/6.3.5...node/6.4.0
+[6.3.5]: https://github.com/subquery/subql/compare/node/6.3.4...node/6.3.5
+[6.3.4]: https://github.com/subquery/subql/compare/node/6.3.3...node/6.3.4
+[6.3.3]: https://github.com/subquery/subql/compare/node/6.3.2...node/6.3.3
+[6.3.2]: https://github.com/subquery/subql/compare/node/6.3.1...node/6.3.2
+[6.3.1]: https://github.com/subquery/subql/compare/node/6.3.0...node/6.3.1
+[6.3.0]: https://github.com/subquery/subql/compare/node/6.2.0...node/6.3.0
+[6.2.0]: https://github.com/subquery/subql/compare/node/6.1.1...node/6.2.0
+[6.1.1]: https://github.com/subquery/subql/compare/node/6.1.0...node/6.1.1
+[6.1.0]: https://github.com/subquery/subql/compare/node/6.0.5...node/6.1.0
+[6.0.5]: https://github.com/subquery/subql/compare/node/6.0.4...node/6.0.5
+[6.0.4]: https://github.com/subquery/subql/compare/node/6.0.3...node/6.0.4
+[6.0.3]: https://github.com/subquery/subql/compare/node/6.0.2...node/6.0.3
+[6.0.2]: https://github.com/subquery/subql/compare/node/6.0.1...node/6.0.2
+[6.0.1]: https://github.com/subquery/subql/compare/node/6.0.0...node/6.0.1
+[6.0.0]: https://github.com/subquery/subql/compare/node/5.11.2...node/6.0.0
+[5.11.2]: https://github.com/subquery/subql/compare/node/5.11.1...node/5.11.2
+[5.11.1]: https://github.com/subquery/subql/compare/node/5.11.0...node/5.11.1
+[5.11.0]: https://github.com/subquery/subql/compare/node/5.10.0...node/5.11.0
+[5.10.0]: https://github.com/subquery/subql/compare/node/5.9.1...node/5.10.0
+[5.9.1]: https://github.com/subquery/subql/compare/node/5.9.0...node/5.9.1
+[5.9.0]: https://github.com/subquery/subql/compare/node/5.8.0...node/5.9.0
+[5.8.0]: https://github.com/subquery/subql/compare/node/5.7.2...node/5.8.0
+[5.7.2]: https://github.com/subquery/subql/compare/node/5.7.1...node/5.7.2
+[5.7.1]: https://github.com/subquery/subql/compare/node/5.7.0...node/5.7.1
+[5.7.0]: https://github.com/subquery/subql/compare/node/5.6.0...node/5.7.0
+[5.6.0]: https://github.com/subquery/subql/compare/node/5.5.0...node/5.6.0
+[5.5.0]: https://github.com/subquery/subql/compare/node/5.4.2...node/5.5.0
+[5.4.2]: https://github.com/subquery/subql/compare/node/5.4.1...node/5.4.2
+[5.4.1]: https://github.com/subquery/subql/compare/node/5.4.0...node/5.4.1
+[5.4.0]: https://github.com/subquery/subql/compare/node/5.3.0...node/5.4.0
+[5.3.0]: https://github.com/subquery/subql/compare/node/5.2.9...node/5.3.0
+[5.2.9]: https://github.com/subquery/subql/compare/node/5.2.8...node/5.2.9
+[5.2.8]: https://github.com/subquery/subql/compare/node/5.2.7...node/5.2.8
+[5.2.7]: https://github.com/subquery/subql/compare/node/5.2.6...node/5.2.7
+[5.2.6]: https://github.com/subquery/subql/compare/node/5.2.5...node/5.2.6
+[5.2.5]: https://github.com/subquery/subql/compare/node/5.2.3...node/5.2.5
+[5.2.3]: https://github.com/subquery/subql/compare/node/5.2.2...node/5.2.3
+[5.2.2]: https://github.com/subquery/subql/compare/node/5.2.1...node/5.2.2
+[5.2.1]: https://github.com/subquery/subql/compare/node/5.2.0...node/5.2.1
+[5.2.0]: https://github.com/subquery/subql/compare/node/5.1.0...node/5.2.0
+[5.1.0]: https://github.com/subquery/subql/compare/node/5.0.2...node/5.1.0
+[5.0.2]: https://github.com/subquery/subql/compare/node/5.0.1...node/5.0.2
+[5.0.1]: https://github.com/subquery/subql/compare/node/5.0.0...node/5.0.1
+[5.0.0]: https://github.com/subquery/subql/compare/node/4.9.0...node/5.0.0
+[4.9.0]: https://github.com/subquery/subql/compare/node/4.8.2...node/4.9.0
+[4.8.2]: https://github.com/subquery/subql/compare/node/4.8.1...node/4.8.2
+[4.8.1]: https://github.com/subquery/subql/compare/node/4.8.0...node/4.8.1
+[4.8.0]: https://github.com/subquery/subql/compare/node/4.7.1...node/4.8.0
+[4.7.1]: https://github.com/subquery/subql/compare/node/4.7.0...node/4.7.1
+[4.7.0]: https://github.com/subquery/subql/compare/node/4.6.6...node/4.7.0
+[4.6.6]: https://github.com/subquery/subql/compare/node/4.6.5...node/4.6.6
+[4.6.5]: https://github.com/subquery/subql/compare/node/4.6.4...node/4.6.5
+[4.6.4]: https://github.com/subquery/subql/compare/node/4.6.3...node/4.6.4
+[4.6.3]: https://github.com/subquery/subql/compare/node/4.6.2...node/4.6.3
+[4.6.2]: https://github.com/subquery/subql/compare/node/4.6.1...node/4.6.2
+[4.6.1]: https://github.com/subquery/subql/compare/node/4.6.0...node/4.6.1
+[4.6.0]: https://github.com/subquery/subql/compare/node/4.5.1...node/4.6.0
+[4.5.1]: https://github.com/subquery/subql/compare/node/4.5.0...node/4.5.1
+[4.5.0]: https://github.com/subquery/subql/compare/node/4.4.2...node/4.5.0
+[4.4.2]: https://github.com/subquery/subql/compare/node/4.4.1...node/4.4.2
+[4.4.1]: https://github.com/subquery/subql/compare/node/4.4.0...node/4.4.1
+[4.4.0]: https://github.com/subquery/subql/compare/node/4.3.2...node/4.4.0
+[4.3.2]: https://github.com/subquery/subql/compare/node/4.3.1...node/4.3.2
+[4.3.1]: https://github.com/subquery/subql/compare/node/4.3.0...node/4.3.1
+[4.3.0]: https://github.com/subquery/subql/compare/node/4.2.1...node/4.3.0
+[4.2.1]: https://github.com/subquery/subql/compare/node/4.2.0...node/4.2.1
+[4.2.0]: https://github.com/subquery/subql/compare/node/4.1.0...node/4.2.0
+[4.1.0]: https://github.com/subquery/subql/compare/node/4.0.1...node/4.1.0
+[4.0.1]: https://github.com/subquery/subql/compare/node/4.0.0...node/4.0.1
+[4.0.0]: https://github.com/subquery/subql/compare/node/3.10.0...node/4.0.0
+[3.10.0]: https://github.com/subquery/subql/compare/node/3.9.3...node/3.10.0
+[3.9.3]: https://github.com/subquery/subql/compare/node/3.9.2...node/3.9.3
+[3.9.2]: https://github.com/subquery/subql/compare/node/3.9.1...node/3.9.2
+[3.9.1]: https://github.com/subquery/subql/compare/node/3.9.0...node/3.9.1
+[3.9.0]: https://github.com/subquery/subql/compare/node/3.6.1...node/3.9.0
+[3.6.1]: https://github.com/subquery/subql/compare/node/3.6.0...node/3.6.1
+[3.6.0]: https://github.com/subquery/subql/compare/node/3.5.3...node/3.6.0
+[3.5.3]: https://github.com/subquery/subql/compare/node/3.5.1...node/3.5.3
+[3.5.1]: https://github.com/subquery/subql/compare/node/3.5.0...node/3.5.1
+[3.5.0]: https://github.com/subquery/subql/compare/node/3.4.11...node/3.5.0
 [3.4.11]: https://github.com/subquery/subql/compare/node/3.4.10...node/3.4.11
 [3.4.10]: https://github.com/subquery/subql/compare/node/3.4.9...node/3.4.10
 [3.4.9]: https://github.com/subquery/subql/compare/node/3.4.8...node/3.4.9

@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'assert';
@@ -20,6 +20,8 @@ import {
   isUnionType,
   ValueNode,
   BooleanValueNode,
+  TypeNode,
+  GraphQLDirective,
 } from 'graphql';
 import {findDuplicateStringArray} from '../array';
 import {Logger} from '../logger';
@@ -29,6 +31,7 @@ import {buildSchemaFromFile} from './schema';
 import {
   FieldScalar,
   GraphQLEntityField,
+  GraphQLFullTextType,
   GraphQLJsonFieldType,
   GraphQLJsonObjectType,
   GraphQLModelsRelationsEnums,
@@ -50,8 +53,26 @@ export function getAllEnums(_schema: GraphQLSchema | string): GraphQLEnumType[] 
   return getEnumsFromSchema(getSchema(_schema));
 }
 
+function getDirectives(schema: GraphQLSchema, names: string[]): GraphQLDirective[] {
+  const res: GraphQLDirective[] = [];
+  for (const name of names) {
+    const directive = schema.getDirective(name);
+    assert(directive, `${name} directive is required`);
+    res.push(directive);
+  }
+  return res;
+}
+
 // eslint-disable-next-line complexity
-export function getAllEntitiesRelations(_schema: GraphQLSchema | string): GraphQLModelsRelationsEnums {
+export function getAllEntitiesRelations(_schema: GraphQLSchema | string | null): GraphQLModelsRelationsEnums {
+  if (_schema === null) {
+    return {
+      models: [],
+      relations: [],
+      enums: [],
+    };
+  }
+
   const schema = getSchema(_schema);
   const entities = Object.values(schema.getTypeMap())
     .filter((node) => node.astNode?.directives?.find(({name: {value}}) => value === DirectiveName.Entity))
@@ -69,22 +90,29 @@ export function getAllEntitiesRelations(_schema: GraphQLSchema | string): GraphQ
   );
 
   const modelRelations = {models: [], relations: [], enums: [...enums.values()]} as GraphQLModelsRelationsEnums;
-  const derivedFrom = schema.getDirective('derivedFrom');
-  const indexDirective = schema.getDirective('index');
+  const [derivedFrom, indexDirective, idDbType] = getDirectives(schema, ['derivedFrom', 'index', 'dbType']);
   for (const entity of entities) {
     const newModel: GraphQLModelsType = {
       name: entity.name,
-      description: entity.description,
+      description: entity.description ?? undefined,
       fields: [],
       indexes: [],
     };
     const entityFields = Object.values(entity.getFields());
 
+    const idField = entityFields.find((field) => field.name === 'id');
+    if (!idField) {
+      throw new Error(`Entity "${entity.name}" is missing required id field.`);
+    } else if (idField.type.toString() !== 'ID!') {
+      throw new Error(`Entity "${entity.name}" type must be ID, received ${idField.type.toString()}`);
+    }
+
     const fkNameSet: string[] = [];
     for (const field of entityFields) {
       const typeString = extractType(field.type);
-      const derivedFromDirectValues = getDirectiveValues(derivedFrom, field.astNode);
-      const indexDirectiveVal = getDirectiveValues(indexDirective, field.astNode);
+      const derivedFromDirectValues = field.astNode ? getDirectiveValues(derivedFrom, field.astNode) : undefined;
+      const indexDirectiveVal = field.astNode ? getDirectiveValues(indexDirective, field.astNode) : undefined;
+      const dbTypeDirectiveVal = field.astNode ? getDirectiveValues(idDbType, field.astNode) : undefined;
 
       //If is a basic scalar type
       const typeClass = getTypeByScalarName(typeString);
@@ -95,7 +123,7 @@ export function getAllEntitiesRelations(_schema: GraphQLSchema | string): GraphQ
       else if (enums.has(typeString)) {
         newModel.fields.push({
           type: typeString,
-          description: field.description,
+          description: field.description ?? undefined,
           isEnum: true,
           isArray: isListType(isNonNullType(field.type) ? getNullableType(field.type) : field.type),
           nullable: !isNonNullType(field.type),
@@ -104,13 +132,48 @@ export function getAllEntitiesRelations(_schema: GraphQLSchema | string): GraphQ
       }
       // If is a foreign key
       else if (entityNameSet.includes(typeString) && !derivedFromDirectValues) {
-        newModel.fields.push(packEntityField(typeString, field, true));
+        let relatedTypeString = FieldScalar.String;
+
+        // Check to see if the relation ID type is modified with the @dbType directive
+        const relatedIdField = entities.find((e) => e.name === typeString)?.getFields().id;
+        const dbIdType = relatedIdField?.astNode ? getDirectiveValues(idDbType, relatedIdField.astNode) : undefined;
+        if (dbIdType) {
+          relatedTypeString = dbIdType.type;
+        }
+
+        newModel.fields.push(packEntityField(relatedTypeString, field, true));
         modelRelations.relations.push({
           from: entity.name,
           type: 'belongsTo',
           to: typeString,
           foreignKey: `${field.name}Id`,
         } as GraphQLRelationsType);
+
+        // Ensures that foreign keys are linked correctly
+        if (
+          field.astNode &&
+          (field.astNode.type.kind === 'ListType' ||
+            (field.astNode.type.kind === 'NonNullType' && field.astNode.type.type.kind === 'ListType'))
+        ) {
+          const resolveName = (type: TypeNode): string => {
+            switch (type.kind) {
+              case 'NamedType':
+                return type.name.value;
+              case 'NonNullType':
+                return resolveName(type.type);
+              case 'ListType':
+                return resolveName(type.type);
+              default:
+                // Any case in case future adds new kind
+                throw new Error(`Unhandled node kind: ${(type as any).kind}`);
+            }
+          };
+
+          throw new Error(
+            `Field "${field.name}" on entity "${newModel.name}" is missing "derivedFrom" directive. Please also make sure "${resolveName(field.astNode.type)}" has a field of type "${newModel.name}".`
+          );
+        }
+
         newModel.indexes.push({
           unique: false,
           fields: [`${field.name}Id`],
@@ -131,10 +194,11 @@ export function getAllEntitiesRelations(_schema: GraphQLSchema | string): GraphQ
       // If is jsonField
       else if (jsonObjects.map((json) => json.name).includes(typeString)) {
         const jsonObject = jsonObjects.find((object) => object.name === typeString);
+        assert(jsonObject, `Json object ${typeString} not found`);
         const jsonObjectType = setJsonObjectType(jsonObject, jsonObjects);
         newModel.fields.push(packJSONField(typeString, field, jsonObjectType));
 
-        const directive = jsonObject.astNode.directives.find(({name: {value}}) => value === DirectiveName.JsonField);
+        const directive = jsonObject.astNode?.directives?.find(({name: {value}}) => value === DirectiveName.JsonField);
         const argValue = directive?.arguments?.find((arg) => arg.name.value === 'indexed')?.value;
         // For backwards compatibility if the argument is not defined then the index will be added
         if (!argValue || (isBooleanValueNode(argValue) && argValue.value !== false)) {
@@ -145,7 +209,7 @@ export function getAllEntitiesRelations(_schema: GraphQLSchema | string): GraphQ
           });
         }
       } else {
-        throw new Error(`${typeString} is not an valid type`);
+        throw new Error(`${typeString} is not a valid type`);
       }
       // handle indexes
       if (indexDirectiveVal) {
@@ -163,18 +227,48 @@ export function getAllEntitiesRelations(_schema: GraphQLSchema | string): GraphQ
               fkIndex.unique = true;
             }
           }
+        } else if (typeString !== 'ID' && enums.has(typeString)) {
+          newModel.indexes.push({
+            fields: [field.name],
+          });
         } else {
           throw new Error(`index can not be added on field ${field.name}`);
         }
+      }
+
+      // Update id type if directive specified
+      if (dbTypeDirectiveVal) {
+        if (typeString !== 'ID') {
+          throw new Error(`dbType directive can only be added on 'id' field, received: ${field.name}`);
+        }
+
+        const dbType = dbTypeDirectiveVal.type;
+        const t = getTypeByScalarName(dbType);
+
+        // Allowlist of types that can be used.
+        const allowedTypes = ['BigInt', 'Float', 'ID', 'Int', 'String'];
+        if (!t || !allowedTypes.includes(t.name)) {
+          throw new Error(
+            `${dbType} is not a defined scalar type, please use another type in the dbType directive.\nAvailable types: ${allowedTypes.join(', ')}`
+          );
+        }
+
+        const f = newModel.fields.find((f) => f.name === 'id');
+        if (!f) {
+          throw new Error('Expected id field to exist on model');
+        }
+        f.type = t.name;
       }
     }
 
     // Composite Indexes
     const compositeIndexDirective = schema.getDirective('compositeIndexes');
+    assert(compositeIndexDirective, 'compositeIndexes directive is required');
+    assert(entity.astNode, 'Entity astNode is required');
     const compositeIndexDirectiveVal = getDirectiveValues(compositeIndexDirective, entity.astNode) as {
       fields?: string[][];
     };
-    if (compositeIndexDirectiveVal?.fields.length) {
+    if (compositeIndexDirectiveVal?.fields && compositeIndexDirectiveVal?.fields.length) {
       const duplicateIndexes = findDuplicateStringArray(compositeIndexDirectiveVal.fields);
       if (duplicateIndexes.length) {
         throw new Error(
@@ -188,6 +282,39 @@ export function getAllEntitiesRelations(_schema: GraphQLSchema | string): GraphQ
         });
       });
     }
+
+    // Fulltext Search
+    const fullTextDirective = schema.getDirective('fullText');
+    assert(fullTextDirective, 'fullText directive is required');
+    const fullTextDirectiveVal = getDirectiveValues(fullTextDirective, entity.astNode) as GraphQLFullTextType;
+
+    if (fullTextDirectiveVal) {
+      if (!fullTextDirectiveVal.fields.length) {
+        throw new Error(`Expected fullText directive to have at least one field on entity ${entity.name}`);
+      }
+
+      // Make fields unique
+      fullTextDirectiveVal.fields = [...new Set(fullTextDirectiveVal.fields)];
+
+      fullTextDirectiveVal.fields.forEach((searchField, index) => {
+        const field = newModel.fields.find((f) => [searchField, `${searchField}Id`].includes(f.name));
+        if (!field) {
+          throw new Error(`Field "${searchField}" in fullText directive doesn't exist on entity "${entity.name}"`);
+        }
+
+        if (!['String', 'ID'].includes(field.type)) {
+          throw new Error(`fullText directive fields only supports String types`);
+        }
+
+        // If the field is a relation, we rename the field to include _id
+        if (field.name === `${searchField}Id`) {
+          fullTextDirectiveVal.fields[index] = `${searchField}_id`;
+        }
+      });
+
+      newModel.fullText = fullTextDirectiveVal;
+    }
+
     modelRelations.models.push(newModel);
   }
   validateRelations(modelRelations);
@@ -198,26 +325,26 @@ function getJoinIndexFields(
   entity: GraphQLObjectType<any, any>,
   entityFields: GraphQLField<any, any, {[p: string]: any}>[],
   fkNameSet: string[],
-  IndexArgFields: string[]
+  indexArgFields: string[]
 ): string[] {
-  if (IndexArgFields.length === 1) {
-    logger.warn(`Composite index expected to be more than 1 field , entity ${entity} [${IndexArgFields}]`);
+  if (indexArgFields.length === 1) {
+    logger.warn(`Composite index expected to be more than 1 field , entity ${entity} [${indexArgFields}]`);
   }
-  if (IndexArgFields.length > 3) {
+  if (indexArgFields.length > 3) {
     throw new Error(
-      `Composite index on entity ${entity} expected not more than 3 fields, index [${IndexArgFields}] got ${IndexArgFields.length} fields`
+      `Composite index on entity ${entity} expected not more than 3 fields, index [${indexArgFields}] got ${indexArgFields.length} fields`
     );
   }
   // check duplicate fields
-  const duplicateFields = IndexArgFields.filter((name, index, arr) => arr.indexOf(name) !== index);
+  const duplicateFields = indexArgFields.filter((name, index, arr) => arr.indexOf(name) !== index);
   if (duplicateFields.length) {
-    throw new Error(`Composite index ${entity}.${IndexArgFields} got duplicated fields: ${duplicateFields}`);
+    throw new Error(`Composite index ${entity}.${indexArgFields} got duplicated fields: ${duplicateFields}`);
   }
-  return IndexArgFields.map((j) => {
+  return indexArgFields.map((j) => {
     const fieldInEntity = entityFields.find((f) => f.name === j);
     // check whether these fields are exist in the entity
     if (fieldInEntity === undefined) {
-      throw new Error(`Composite index [${IndexArgFields}], field ${j} not found within entity ${entity} `);
+      throw new Error(`Composite index [${indexArgFields}], field ${j} not found within entity ${entity} `);
     }
     // check is fk
     if (fkNameSet.includes(fieldInEntity.name)) {
@@ -234,8 +361,8 @@ function packEntityField(
 ): GraphQLEntityField {
   return {
     name: isForeignKey ? `${field.name}Id` : field.name,
-    type: isForeignKey ? FieldScalar.String : typeString,
-    description: field.description,
+    type: typeString,
+    description: field.description ?? undefined,
     isArray: isListType(isNonNullType(field.type) ? getNullableType(field.type) : field.type),
     nullable: !isNonNullType(field.type),
     isEnum: false,
@@ -250,7 +377,7 @@ function packJSONField(
   return {
     name: field.name,
     type: 'Json',
-    description: field.description,
+    description: field.description ?? undefined,
     jsonInterface: jsonObject,
     isArray: isListType(isNonNullType(field.type) ? getNullableType(field.type) : field.type),
     nullable: !isNonNullType(field.type),
@@ -269,16 +396,12 @@ export function setJsonObjectType(
   for (const field of Object.values(jsonObject.getFields())) {
     //check if field is also json
     const typeString = extractType(field.type);
-    const isJsonType = jsonObjects.map((json) => json.name).includes(typeString);
+    const jsonType = jsonObjects.find((json) => json.name === typeString);
+
     graphQLJsonObject.fields.push({
       name: field.name,
-      type: isJsonType ? 'Json' : extractType(field.type),
-      jsonInterface: isJsonType
-        ? setJsonObjectType(
-            jsonObjects.find((object) => object.name === typeString),
-            jsonObjects
-          )
-        : undefined,
+      type: jsonType ? 'Json' : extractType(field.type),
+      jsonInterface: jsonType ? setJsonObjectType(jsonType, jsonObjects) : undefined,
       nullable: !isNonNullType(field.type),
       isArray: isListType(isNonNullType(field.type) ? getNullableType(field.type) : field.type),
     } as GraphQLJsonFieldType);

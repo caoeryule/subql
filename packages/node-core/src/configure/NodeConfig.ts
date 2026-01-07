@@ -1,12 +1,14 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
-import {getFileContent, loadFromJsonOrYaml} from '@subql/common';
+import {getFileContent, loadFromJsonOrYaml, normalizeNetworkEndpoints} from '@subql/common';
+import {IEndpointConfig} from '@subql/types-core';
 import {last} from 'lodash';
 import {LevelWithSilent} from 'pino';
+import {HistoricalMode} from '../indexer';
 import {getLogger} from '../logger';
 import {assign} from '../utils/object';
 
@@ -21,16 +23,14 @@ export interface IConfig {
   readonly blockTime: number;
   readonly debug?: string;
   readonly preferRange: boolean;
-  readonly networkEndpoint?: string[];
-  readonly primaryNetworkEndpoint?: string;
-  readonly networkDictionary?: string;
-  readonly dictionaryResolver?: string | false;
+  readonly networkEndpoint?: Record<string, IEndpointConfig>;
+  readonly primaryNetworkEndpoint?: [string, IEndpointConfig];
+  readonly networkDictionary?: string[];
   readonly dictionaryRegistry: string;
   readonly outputFmt?: 'json';
   readonly logLevel: LevelWithSilent;
   readonly queryLimit: number;
   readonly indexCountLimit: number;
-  readonly timestampField: boolean;
   readonly proofOfIndex: boolean;
   readonly ipfs?: string;
   readonly dictionaryTimeout: number;
@@ -39,21 +39,32 @@ export interface IConfig {
   readonly profiler?: boolean;
   readonly unsafe?: boolean;
   readonly subscription: boolean;
-  readonly disableHistorical: boolean;
+  readonly historical: HistoricalMode;
   readonly multiChain: boolean;
   readonly reindex?: number;
   readonly unfinalizedBlocks?: boolean;
   readonly pgCa?: string;
   readonly pgKey?: string;
   readonly pgCert?: string;
+  readonly pgPoolMin?: number;
+  readonly pgPoolMax?: number;
+  readonly pgPoolIdle?: number;
+  readonly pgPoolAqcuire?: number;
+  readonly pgPoolEvict?: number;
   readonly storeCacheThreshold: number;
   readonly storeCacheUpperLimit: number;
   readonly storeGetCacheSize: number;
   readonly storeCacheAsync: boolean;
-  readonly scaleBatchSize?: boolean;
   readonly storeFlushInterval: number;
+  readonly storeCacheTarget: number;
   readonly isTest?: boolean;
   readonly root?: string;
+  readonly allowSchemaMigration: boolean;
+  readonly csvOutDir?: string;
+  readonly monitorOutDir: string;
+  readonly monitorFileSize?: number;
+  readonly monitorObjectMaxDepth: number;
+  readonly enableCache?: boolean;
 }
 
 export type MinConfig = Partial<Omit<IConfig, 'subquery'>> & Pick<IConfig, 'subquery'>;
@@ -67,20 +78,22 @@ const DEFAULT_CONFIG = {
   debug: undefined,
   queryLimit: 100,
   indexCountLimit: 10,
-  timestampField: true,
   proofOfIndex: false,
   dictionaryTimeout: 30,
   dictionaryQuerySize: 10000,
   profiler: false,
   subscription: false,
-  disableHistorical: false,
+  historical: 'height',
   multiChain: false,
-  unfinalizedBlocks: false,
   storeCacheThreshold: 1000,
   storeCacheUpperLimit: 10000,
   storeGetCacheSize: 500,
   storeCacheAsync: true,
   storeFlushInterval: 5,
+  storeCacheTarget: 10,
+  allowSchemaMigration: false,
+  monitorOutDir: './.monitor',
+  monitorObjectMaxDepth: 5,
 };
 
 export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
@@ -131,20 +144,31 @@ export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
     return this._config.batchSize;
   }
 
-  get networkEndpoints(): string[] | undefined {
-    return typeof this._config.networkEndpoint === 'string'
-      ? [this._config.networkEndpoint]
-      : this._config.networkEndpoint;
+  get networkEndpoints(): Record<string, IEndpointConfig> | undefined {
+    return normalizeNetworkEndpoints(
+      this._config.networkEndpoint as string | string[] | Record<string, IEndpointConfig>
+    );
   }
 
-  get primaryNetworkEndpoint(): string | undefined {
+  get primaryNetworkEndpoint(): [string, IEndpointConfig] | undefined {
     return this._config.primaryNetworkEndpoint;
+    // if (!this._config.primaryNetworkEndpoint) {
+    //   return undefined;
+    // }
+    // return [this._config.primaryNetworkEndpoint, {}];
   }
 
-  get networkDictionary(): string | undefined {
-    return this._config.networkDictionary;
+  get networkDictionaries(): string[] | undefined | false {
+    return typeof this._config.networkDictionary === 'string'
+      ? this._config.networkDictionary === 'false'
+        ? false
+        : [this._config.networkDictionary]
+      : this._config.networkDictionary;
   }
 
+  get allowSchemaMigration(): boolean {
+    return this._config.allowSchemaMigration;
+  }
   get storeCacheThreshold(): number {
     return this._config.storeCacheThreshold;
   }
@@ -165,11 +189,8 @@ export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
     return this._config.storeFlushInterval;
   }
 
-  get dictionaryResolver(): string | false {
-    if (this._config.dictionaryResolver === 'false') {
-      return false;
-    }
-    return this._config.dictionaryResolver ?? 'https://kepler-auth.subquery.network';
+  get storeCacheTarget(): number {
+    return this._config.storeCacheTarget;
   }
 
   get dictionaryRegistry(): string {
@@ -212,10 +233,6 @@ export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
     return this._config.indexCountLimit;
   }
 
-  get timestampField(): boolean {
-    return this._config.timestampField;
-  }
-
   get proofOfIndex(): boolean {
     return this._config.proofOfIndex;
   }
@@ -253,8 +270,15 @@ export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
     return this._config.subscription;
   }
 
-  get disableHistorical(): boolean {
-    return this._isTest ? true : this._config.disableHistorical;
+  get historical(): HistoricalMode {
+    if (this._isTest) return false;
+
+    const val = this._config.historical;
+    // Runtime check, option can come from cli, project or config file
+    if (val !== false && val !== 'height' && val !== 'timestamp') {
+      throw new Error(`Historical mode is invalid. Received: ${val}`);
+    }
+    return val;
   }
 
   get multiChain(): boolean {
@@ -262,15 +286,17 @@ export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
   }
 
   get unfinalizedBlocks(): boolean {
-    return !!this._config.unfinalizedBlocks;
+    if (this._isTest) return false;
+
+    if (this._config.unfinalizedBlocks === false) {
+      return false;
+    }
+
+    return this.historical !== false;
   }
 
   get isPostgresSecureConnection(): boolean {
     return !!this._config.pgCa;
-  }
-
-  get scaleBatchSize(): boolean {
-    return !!this._config.scaleBatchSize;
   }
 
   get postgresCACert(): string | undefined {
@@ -310,8 +336,51 @@ export class NodeConfig<C extends IConfig = IConfig> implements IConfig {
     }
   }
 
+  get pgPoolMax(): number | undefined {
+    return this._config.pgPoolMax;
+  }
+
+  get pgPoolMin(): number | undefined {
+    return this._config.pgPoolMin;
+  }
+
+  get pgPoolAqcuire(): number | undefined {
+    return this._config.pgPoolAqcuire;
+  }
+
+  get pgPoolIdle(): number | undefined {
+    return this._config.pgPoolIdle;
+  }
+
+  get pgPoolEvict(): number | undefined {
+    return this._config.pgPoolEvict;
+  }
+
   get root(): string | undefined {
     return this._config.root;
+  }
+
+  get csvOutDir(): string | undefined {
+    return this._config.csvOutDir;
+  }
+
+  get monitorOutDir(): string {
+    return this._config.monitorOutDir;
+  }
+
+  get monitorFileSize(): number {
+    const defaultMonitorFileSize = 200;
+    // If user passed though yarg, we will record monitor file by this size, no matter poi or not
+    // if user didn't pass through yarg, we will record monitor file by this default size only when poi is enabled
+    return this._config.monitorFileSize ?? (this._config.proofOfIndex ? defaultMonitorFileSize : 0);
+  }
+
+  get monitorObjectMaxDepth(): number {
+    return this._config.monitorObjectMaxDepth;
+  }
+
+  get enableCache(): boolean {
+    return this._config.enableCache ?? true;
   }
 
   merge(config: Partial<IConfig>): this {

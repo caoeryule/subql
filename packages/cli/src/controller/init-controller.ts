@@ -1,21 +1,25 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import childProcess, {execSync} from 'child_process';
 import fs from 'fs';
 import * as path from 'path';
-import {promisify} from 'util';
-import {DEFAULT_MANIFEST, DEFAULT_TS_MANIFEST, loadFromJsonOrYaml, makeTempDir} from '@subql/common';
-import {parseEthereumProjectManifest} from '@subql/common-ethereum';
-import {ProjectManifestV1_0_0} from '@subql/types-core';
+import {DEFAULT_MANIFEST, DEFAULT_TS_MANIFEST, loadFromJsonOrYaml, makeTempDir, NETWORK_FAMILY} from '@subql/common';
+import {ProjectManifestV1_0_0, ProjectNetworkConfig} from '@subql/types-core';
 import axios from 'axios';
-import {copySync} from 'fs-extra';
-import rimraf from 'rimraf';
+import {rimraf} from 'rimraf';
 import git from 'simple-git';
 import {parseDocument, YAMLMap, YAMLSeq} from 'yaml';
-import {BASE_TEMPLATE_URl, ENDPOINT_REG} from '../constants';
+import {BASE_TEMPLATE_URl, CAPTURE_CHAIN_ID_REG, CHAIN_ID_REG, ENDPOINT_REG} from '../constants';
+import {loadDependency} from '../modulars';
 import {isProjectSpecV1_0_0, ProjectSpecBase} from '../types';
 import {
+  defaultEnvDevelopLocalPath,
+  defaultEnvDevelopPath,
+  defaultEnvLocalPath,
+  defaultEnvPath,
+  defaultGitIgnorePath,
+  defaultMultiChainYamlManifestPath,
   defaultTSManifestPath,
   defaultYamlManifestPath,
   errorHandle,
@@ -55,19 +59,18 @@ export interface Template {
     examples: ExampleProjectInterface[];
   }[];
 }
+
+const axiosInstance = axios.create({baseURL: BASE_TEMPLATE_URl});
+
 // GET /all
 // https://templates.subquery.network/all
 export async function fetchTemplates(): Promise<Template[]> {
   try {
-    return (
-      await axios({
-        method: 'get',
-        url: '/all', // /networks
-        baseURL: BASE_TEMPLATE_URl,
-      })
-    ).data?.templates as Template[];
+    const res = await axiosInstance.get<{templates: Template[]}>('/all');
+
+    return res.data.templates;
   } catch (e) {
-    errorHandle(e, `Update to reach endpoint '${BASE_TEMPLATE_URl}/all`);
+    throw errorHandle(e, `Update to reach endpoint '${BASE_TEMPLATE_URl}/all`);
   }
 }
 
@@ -75,15 +78,10 @@ export async function fetchTemplates(): Promise<Template[]> {
 // https://templates.subquery.network/networks
 export async function fetchNetworks(): Promise<Template[]> {
   try {
-    return (
-      await axios({
-        method: 'get',
-        url: '/networks',
-        baseURL: BASE_TEMPLATE_URl,
-      })
-    ).data.results as Template[];
+    const res = await axiosInstance.get<{results: Template[]}>('/networks');
+    return res.data.results;
   } catch (e) {
-    errorHandle(e, `Update to reach endpoint '${BASE_TEMPLATE_URl}/networks`);
+    throw errorHandle(e, `Update to reach endpoint '${BASE_TEMPLATE_URl}/networks`);
   }
 }
 
@@ -93,15 +91,10 @@ export async function fetchExampleProjects(
   networkCode: string
 ): Promise<ExampleProjectInterface[]> {
   try {
-    return (
-      await axios({
-        method: 'get',
-        url: `/networks/${familyCode}/${networkCode}`,
-        baseURL: BASE_TEMPLATE_URl,
-      })
-    ).data.results as ExampleProjectInterface[];
+    const res = await axiosInstance.get<{results: ExampleProjectInterface[]}>(`/networks/${familyCode}/${networkCode}`);
+    return res.data.results;
   } catch (e) {
-    errorHandle(e, `Update to reach endpoint ${familyCode}/${networkCode}`);
+    throw errorHandle(e, `Update to reach endpoint ${familyCode}/${networkCode}`);
   }
 }
 
@@ -136,40 +129,64 @@ export async function cloneProjectTemplate(
   const tempPath = await makeTempDir();
   //use sparse-checkout to clone project to temp directory
   await git(tempPath).init().addRemote('origin', selectedProject.remote);
-  await git(tempPath).raw('sparse-checkout', 'set', `${selectedProject.path}`);
+  await git(tempPath).raw('sparse-checkout', 'set', selectedProject.path);
   await git(tempPath).raw('pull', 'origin', 'main');
   // Copy content to project path
-  copySync(path.join(tempPath, `${selectedProject.path}`), projectPath);
+  await fs.promises.cp(path.join(tempPath, selectedProject.path), projectPath, {recursive: true});
   // Clean temp folder
   fs.rmSync(tempPath, {recursive: true, force: true});
   return projectPath;
 }
 
-export async function readDefaults(projectPath: string): Promise<string[]> {
+export async function readDefaults(projectPath: string): Promise<{
+  endpoint: ProjectNetworkConfig['endpoint'];
+  author: string;
+  description: string;
+  isMultiChainProject: boolean;
+}> {
   const packageData = await fs.promises.readFile(`${projectPath}/package.json`);
   const currentPackage = JSON.parse(packageData.toString());
-  let endpoint: string | string[];
+  const author: string = currentPackage.author;
+  const description: string = currentPackage.description;
+  let endpoint: ProjectNetworkConfig['endpoint'];
+  let isMultiChainProject = false;
   const defaultTsPath = defaultTSManifestPath(projectPath);
   const defaultYamlPath = defaultYamlManifestPath(projectPath);
+  const defaultMultiChainPath = defaultMultiChainYamlManifestPath(projectPath);
 
   if (fs.existsSync(defaultTsPath)) {
     const tsManifest = await fs.promises.readFile(defaultTsPath, 'utf8');
     const extractedTsValues = extractFromTs(tsManifest.toString(), {
       endpoint: ENDPOINT_REG,
     });
-    endpoint = extractedTsValues.endpoint;
-  } else {
+
+    endpoint = extractedTsValues.endpoint ?? [];
+  } else if (fs.existsSync(defaultYamlPath)) {
     const yamlManifest = await fs.promises.readFile(defaultYamlPath, 'utf8');
     const extractedYamlValues = parseDocument(yamlManifest).toJS() as ProjectManifestV1_0_0;
     endpoint = extractedYamlValues.network.endpoint;
+  } else if (fs.existsSync(defaultMultiChainPath)) {
+    endpoint = [];
+    isMultiChainProject = true;
+  } else {
+    throw new Error('Failed to read manifest file while preparing the project');
   }
 
-  return [endpoint, currentPackage.author, currentPackage.description];
+  return {endpoint, author, description, isMultiChainProject};
 }
 
-export async function prepare(projectPath: string, project: ProjectSpecBase): Promise<void> {
+export async function prepare(
+  projectPath: string,
+  project: ProjectSpecBase,
+  isMultiChainProject = false
+): Promise<void> {
   try {
-    await prepareManifest(projectPath, project);
+    if (!isMultiChainProject) await prepareEnv(projectPath, project);
+  } catch (e) {
+    throw new Error('Failed to prepare read or write .env file while preparing the project');
+  }
+  try {
+    if (!isMultiChainProject) await prepareManifest(projectPath, project);
   } catch (e) {
     throw new Error('Failed to prepare read or write manifest while preparing the project');
   }
@@ -179,9 +196,14 @@ export async function prepare(projectPath: string, project: ProjectSpecBase): Pr
     throw new Error('Failed to prepare read or write package.json while preparing the project');
   }
   try {
-    await promisify(rimraf)(`${projectPath}/.git`);
+    await rimraf(`${projectPath}/.git`);
   } catch (e) {
     throw new Error('Failed to remove .git from template project');
+  }
+  try {
+    await prepareGitIgnore(projectPath);
+  } catch (e) {
+    throw new Error('Failed to prepare read or write .gitignore while preparing the project');
   }
 }
 
@@ -192,6 +214,17 @@ export async function preparePackage(projectPath: string, project: ProjectSpecBa
   currentPackage.name = project.name;
   currentPackage.description = project.description ?? currentPackage.description;
   currentPackage.author = project.author;
+  //add build and develop scripts
+  currentPackage.scripts = {
+    ...currentPackage.scripts,
+    build: 'subql codegen && subql build',
+    'build:develop': 'NODE_ENV=develop subql codegen && NODE_ENV=develop subql build',
+  };
+  //add dotenv package for env file support
+  currentPackage.devDependencies = {
+    ...currentPackage.devDependencies,
+    dotenv: 'latest',
+  };
   const newPackage = JSON.stringify(currentPackage, null, 2);
   await fs.promises.writeFile(`${projectPath}/package.json`, newPackage, 'utf8');
 }
@@ -206,12 +239,15 @@ export async function prepareManifest(projectPath: string, project: ProjectSpecB
 
   if (isTs) {
     const tsManifest = (await fs.promises.readFile(tsPath, 'utf8')).toString();
-    //converting string endpoint to array of string.
-    const formattedEndpoint = Array.isArray(project.endpoint)
-      ? JSON.stringify(project.endpoint)
-      : `[ "${project.endpoint}" ]`;
-
-    manifestData = findReplace(tsManifest, ENDPOINT_REG, `endpoint: ${formattedEndpoint}`);
+    //adding env config for endpoint.
+    const formattedEndpoint = `process.env.ENDPOINT!?.split(',') as string[] | string`;
+    const endpointUpdatedManifestData = findReplace(tsManifest, ENDPOINT_REG, `endpoint: ${formattedEndpoint}`);
+    const chainIdUpdatedManifestData = findReplace(
+      endpointUpdatedManifestData,
+      CHAIN_ID_REG,
+      `chainId: process.env.CHAIN_ID!`
+    );
+    manifestData = addDotEnvConfigCode(chainIdUpdatedManifestData);
   } else {
     //load and write manifest(project.yaml)
     const yamlManifest = await fs.promises.readFile(yamlPath, 'utf8');
@@ -229,14 +265,93 @@ export async function prepareManifest(projectPath: string, project: ProjectSpecB
   await fs.promises.writeFile(isTs ? tsPath : yamlPath, manifestData, 'utf8');
 }
 
-export function installDependencies(projectPath: string, useNpm?: boolean): void {
-  let command = 'yarn install';
-
-  if (useNpm || !checkYarnExists()) {
-    command = 'npm install';
+export function addDotEnvConfigCode(manifestData: string): string {
+  // add dotenv config after imports in project.ts file
+  let snippetCodeIndex = -1;
+  const manifestSections = manifestData.split('\n');
+  for (let i = 0; i < manifestSections.length; i++) {
+    if (manifestSections[i].trim() === '') {
+      snippetCodeIndex = i + 1;
+      break;
+    }
   }
 
-  childProcess.execSync(command, {cwd: projectPath});
+  if (snippetCodeIndex === -1) {
+    snippetCodeIndex = 0;
+  }
+
+  const envConfigCodeSnippet = `
+import * as dotenv from 'dotenv';
+import path from 'path';
+
+const mode = process.env.NODE_ENV || 'production';
+
+// Load the appropriate .env file
+const dotenvPath = path.resolve(__dirname, \`.env\${mode !== 'production' ? \`.$\{mode}\` : ''}\`);
+dotenv.config({ path: dotenvPath, quiet: true });
+`;
+
+  // Inserting the env configuration code in project.ts
+  const updatedTsProject = `${
+    manifestSections.slice(0, snippetCodeIndex).join('\n') + envConfigCodeSnippet
+  }\n${manifestSections.slice(snippetCodeIndex).join('\n')}`;
+  return updatedTsProject;
+}
+
+export async function prepareEnv(projectPath: string, project: ProjectSpecBase): Promise<void> {
+  //load and write manifest(project.ts/project.yaml)
+  const envPath = defaultEnvPath(projectPath);
+  const envDevelopPath = defaultEnvDevelopPath(projectPath);
+  const envLocalPath = defaultEnvLocalPath(projectPath);
+  const envDevelopLocalPath = defaultEnvDevelopLocalPath(projectPath);
+
+  let chainId;
+  if (isProjectSpecV1_0_0(project)) {
+    chainId = project.chainId;
+  } else {
+    const tsPath = defaultTSManifestPath(projectPath);
+    const tsManifest = (await fs.promises.readFile(tsPath, 'utf8')).toString();
+
+    const match = tsManifest.match(CAPTURE_CHAIN_ID_REG);
+    if (match) {
+      chainId = match[2];
+    }
+  }
+
+  //adding env configs
+  const endpointStr = Array.isArray(project.endpoint) ? project.endpoint.join(',') : JSON.stringify(project.endpoint);
+
+  const envData = `ENDPOINT=${endpointStr}\nCHAIN_ID=${chainId}`;
+  await fs.promises.writeFile(envPath, envData, 'utf8');
+  await fs.promises.writeFile(envDevelopPath, envData, 'utf8');
+  await fs.promises.writeFile(envLocalPath, envData, 'utf8');
+  await fs.promises.writeFile(envDevelopLocalPath, envData, 'utf8');
+}
+
+export async function prepareGitIgnore(projectPath: string): Promise<void> {
+  //load and write .gitignore
+  const gitIgnorePath = defaultGitIgnorePath(projectPath);
+  const isGitIgnore = fs.existsSync(gitIgnorePath);
+
+  if (isGitIgnore) {
+    let gitIgnoreManifest = (await fs.promises.readFile(gitIgnorePath, 'utf8')).toString();
+    //add local .env files in .gitignore
+    gitIgnoreManifest += `\n# ENV local files\n.env.local\n.env.develop.local`;
+    await fs.promises.writeFile(gitIgnorePath, gitIgnoreManifest, 'utf8');
+  }
+}
+
+export function installDependencies(
+  projectPath: string,
+  packageManager: 'npm' | 'yarn' | 'pnpm' = 'npm',
+  silent = false
+): void {
+  if (packageManager === 'yarn' && !checkYarnExists()) {
+    packageManager = 'npm';
+  }
+  const command = `${packageManager} install`;
+
+  childProcess.execSync(command, {cwd: projectPath, stdio: silent ? 'ignore' : undefined});
 }
 
 function checkYarnExists(): boolean {
@@ -292,7 +407,9 @@ export async function validateEthereumProjectManifest(projectPath: string): Prom
     manifest = loadFromJsonOrYaml(path.join(projectPath, DEFAULT_MANIFEST));
   }
   try {
-    return isTs ? validateEthereumTsManifest(manifest) : !!parseEthereumProjectManifest(manifest);
+    return isTs
+      ? validateEthereumTsManifest(manifest)
+      : !!loadDependency(NETWORK_FAMILY.ethereum, projectPath).parseProjectManifest(manifest);
   } catch (e) {
     return false;
   }

@@ -1,10 +1,11 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import * as workers from 'worker_threads';
 import {Logger} from 'pino';
 import {getLogger} from '../../logger';
 import '../../utils/bigint';
+import {exitWithError} from '../../process';
 
 export type SerializableError = {
   message: string;
@@ -132,6 +133,7 @@ abstract class WorkerIO {
           e as any,
           `Failed to post message, function="${String(fnName)}", args="${JSON.stringify(args)}"`
         );
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
         reject(e);
       }
     });
@@ -160,6 +162,10 @@ export class WorkerHost<T extends AsyncMethods> extends WorkerIO {
   protected getReqId(): number {
     return this._reqCounter--;
   }
+
+  getWorkerData(): any {
+    return workers.workerData;
+  }
 }
 
 /* Host side, used to initialise and interact with worker */
@@ -172,7 +178,12 @@ export class Worker<T extends AsyncMethods> extends WorkerIO {
    * @param hostFns - functions the host exposes to the worker
    * @param exitMain - if true, when a worker exits the host will also exit
    * */
-  private constructor(private worker: workers.Worker, workerFns: (keyof T)[], hostFns: AsyncMethods, exitMain = true) {
+  private constructor(
+    private worker: workers.Worker,
+    workerFns: (keyof T)[],
+    hostFns: AsyncMethods,
+    exitMain = true
+  ) {
     super(worker, workerFns as string[], hostFns, getLogger(`worker: ${worker.threadId}`));
 
     this.worker.on('error', (error) => {
@@ -184,9 +195,10 @@ export class Worker<T extends AsyncMethods> extends WorkerIO {
     });
 
     this.worker.on('exit', (code) => {
-      this.logger.error(`Worker exited with code ${code}`);
+      const errMsg = `Worker exited with code ${code}`;
+      this.logger.error(errMsg);
       if (exitMain) {
-        process.exit(code);
+        exitWithError(errMsg, undefined, code);
       }
     });
   }
@@ -196,11 +208,13 @@ export class Worker<T extends AsyncMethods> extends WorkerIO {
     workerFns: (keyof T)[],
     hostFns: H,
     root: string,
-    exitMain = true
+    exitMain = true,
+    workerData?: any
   ): Worker<T> & T {
     const worker = new Worker(
       new workers.Worker(path, {
         argv: [...process.argv, '--root', root],
+        workerData,
       }),
       workerFns,
       hostFns,

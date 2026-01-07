@@ -1,11 +1,11 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {blake2AsHex} from '@polkadot/util-crypto';
 
 export const METADATA_REGEX = /^_metadata$/;
-
 export const MULTI_METADATA_REGEX = /^_metadata_[a-zA-Z0-9-]+$/;
+export const MULTI_GLOBAL_REGEX = /^_[global|Global]$/;
 
 export function getMetadataTableName(chainId: string): string {
   const hash = blake2AsHex(chainId, 64);

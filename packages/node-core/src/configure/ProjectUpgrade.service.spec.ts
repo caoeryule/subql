@@ -1,8 +1,10 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import {CacheMetadataModel, ISubqueryProject} from '../indexer';
-import {IProjectUpgradeService, ProjectUpgradeSevice, upgradableSubqueryProject} from './ProjectUpgrade.service';
+import {Sequelize} from '@subql/x-sequelize';
+import {CacheMetadataModel, IStoreModelProvider, ISubqueryProject, StoreCacheService, StoreService} from '../indexer';
+import {NodeConfig} from './NodeConfig';
+import {IProjectUpgradeService, ProjectUpgradeService, upgradableSubqueryProject} from './ProjectUpgrade.service';
 
 const templateProject = {
   network: {
@@ -47,6 +49,19 @@ const demoProjects = [
     parent: {
       block: 50,
       reference: '4',
+    },
+    ...templateProject,
+  },
+] as ISubqueryProject[];
+
+const demoProjectsUntil = [
+  {
+    ...templateProject,
+  },
+  {
+    parent: {
+      untilBlock: 10,
+      reference: '0',
     },
     ...templateProject,
   },
@@ -99,9 +114,11 @@ const mockMetadata = () => {
 };
 
 describe('Project Upgrades', () => {
+  jest.spyOn(ProjectUpgradeService as any, 'rewindableCheck').mockImplementation(() => true);
+
   describe('Loading projects', () => {
     it('can load a project with no parents', async () => {
-      const upgradeService = await ProjectUpgradeSevice.create(
+      const upgradeService = await ProjectUpgradeService.create(
         demoProjects[0],
         (id) => Promise.resolve(demoProjects[parseInt(id, 10)]),
         1
@@ -111,7 +128,7 @@ describe('Project Upgrades', () => {
     });
 
     it('can load all parent projects', async () => {
-      const upgradeService = await ProjectUpgradeSevice.create(
+      const upgradeService = await ProjectUpgradeService.create(
         demoProjects[5],
         (id) => Promise.resolve(demoProjects[parseInt(id, 10)]),
         1
@@ -120,14 +137,24 @@ describe('Project Upgrades', () => {
       expect([...upgradeService.projects.keys()]).toEqual([1, 10, 20, 30, 40, 50]);
     });
 
+    it('can load all parent projects with untilBlock field', async () => {
+      const upgradeService = await ProjectUpgradeService.create(
+        demoProjectsUntil[1],
+        (id) => Promise.resolve(demoProjectsUntil[parseInt(id, 10)]),
+        1
+      );
+
+      expect([...upgradeService.projects.keys()]).toEqual([1, 10]);
+    });
+
     it('can handle projects that somehow refer to each other', async () => {
       await expect(
-        ProjectUpgradeSevice.create(loopProjects[1], (id) => Promise.resolve(loopProjects[parseInt(id, 10)]), 1)
+        ProjectUpgradeService.create(loopProjects[1], (id) => Promise.resolve(loopProjects[parseInt(id, 10)]), 1)
       ).rejects.toThrow();
     });
 
     it('can load all parent projects upto startHeight', async () => {
-      const upgradeService = await ProjectUpgradeSevice.create(
+      const upgradeService = await ProjectUpgradeService.create(
         demoProjects[5],
         (id) => Promise.resolve(demoProjects[parseInt(id, 10)]),
         21
@@ -136,8 +163,36 @@ describe('Project Upgrades', () => {
       expect([...upgradeService.projects.keys()]).toEqual([20, 30, 40, 50]);
     });
 
+    // It would be a user error to do this but its still possible. In reality the last project should have no parent
+    it('can use the correct project when the parent upgrades at the start height', async () => {
+      const projects = [
+        {
+          id: '0',
+          network: {
+            chainId: '1',
+          },
+          dataSources: [{startBlock: 10}],
+        },
+        {
+          id: '1',
+          parent: {
+            block: 10,
+            reference: '0',
+          },
+          network: {
+            chainId: '1',
+          },
+          dataSources: [{startBlock: 10}],
+        },
+      ] as ISubqueryProject[];
+
+      await expect(() =>
+        ProjectUpgradeService.create(projects[1], (id) => Promise.resolve(projects[parseInt(id, 10)]))
+      ).rejects.toThrow('Project already exists at height 10');
+    });
+
     it('can load all parent projects upto and including startHeight', async () => {
-      const upgradeService = await ProjectUpgradeSevice.create(
+      const upgradeService = await ProjectUpgradeService.create(
         demoProjects[5],
         (id) => Promise.resolve(demoProjects[parseInt(id, 10)]),
         20
@@ -148,7 +203,7 @@ describe('Project Upgrades', () => {
 
     it('will throw if parent projects are not at an earlier height', async () => {
       await expect(
-        ProjectUpgradeSevice.create(futureProjects[2], (id) => Promise.resolve(futureProjects[parseInt(id, 10)]), 1)
+        ProjectUpgradeService.create(futureProjects[2], (id) => Promise.resolve(futureProjects[parseInt(id, 10)]), 1)
       ).rejects.toThrow();
     });
 
@@ -157,7 +212,7 @@ describe('Project Upgrades', () => {
         dataSources: [{startBlock: 20}],
       } as ISubqueryProject;
       await expect(
-        ProjectUpgradeSevice.create(project, (id) => Promise.resolve(futureProjects[parseInt(id, 10)]), 1)
+        ProjectUpgradeService.create(project, (id) => Promise.resolve(futureProjects[parseInt(id, 10)]), 1)
       ).rejects.toThrow();
     });
 
@@ -177,7 +232,7 @@ describe('Project Upgrades', () => {
       ] as ISubqueryProject[];
 
       await expect(
-        ProjectUpgradeSevice.create(projects[1], (id) => Promise.resolve(projects[parseInt(id, 10)]), 1)
+        ProjectUpgradeService.create(projects[1], (id) => Promise.resolve(projects[parseInt(id, 10)]), 1)
       ).rejects.toThrow();
     });
 
@@ -201,16 +256,16 @@ describe('Project Upgrades', () => {
       ] as ISubqueryProject[];
 
       await expect(
-        ProjectUpgradeSevice.create(projects[1], (id) => Promise.resolve(projects[parseInt(id, 10)]), 1)
+        ProjectUpgradeService.create(projects[1], (id) => Promise.resolve(projects[parseInt(id, 10)]), 1)
       ).rejects.toThrow();
     });
   });
 
   describe('Getting projects for heights', () => {
-    let upgradeService: ProjectUpgradeSevice<ISubqueryProject>;
+    let upgradeService: ProjectUpgradeService<ISubqueryProject>;
 
     beforeAll(async () => {
-      upgradeService = await ProjectUpgradeSevice.create(
+      upgradeService = await ProjectUpgradeService.create(
         demoProjects[5],
         (id) => Promise.resolve(demoProjects[parseInt(id, 10)]),
         1
@@ -231,22 +286,29 @@ describe('Project Upgrades', () => {
   });
 
   describe('Upgradable subquery project', () => {
-    let upgradeService: ProjectUpgradeSevice<ISubqueryProject>;
+    let upgradeService: ProjectUpgradeService<ISubqueryProject>;
     let project: ISubqueryProject & IProjectUpgradeService<ISubqueryProject>;
+    let storeCache: IStoreModelProvider;
 
     beforeEach(async () => {
-      upgradeService = await ProjectUpgradeSevice.create(
+      const sequelize = {transaction: jest.fn(() => ({commit: jest.fn()}))} as any as Sequelize;
+      storeCache = new StoreCacheService(sequelize, {} as any, {} as any);
+      // eslint-disable-next-line @typescript-eslint/dot-notation
+      (storeCache as any).cachedModels['_metadata'] = mockMetadata();
+
+      upgradeService = await ProjectUpgradeService.create(
         demoProjects[5],
         (id) => Promise.resolve(demoProjects[parseInt(id, 10)]),
         1
       );
+      const storeService = new StoreService(sequelize, {} as any, storeCache, project);
 
-      await upgradeService.init(mockMetadata());
+      await upgradeService.init(storeService, 1, {} as NodeConfig, sequelize, '');
 
       project = upgradableSubqueryProject(upgradeService);
     });
 
-    it('cant set values other than `currentHeight`', () => {
+    it('cant set values other than `currentHeightg`', () => {
       expect(() => ((project as any).id = 'not possible')).toThrow();
     });
 
@@ -290,10 +352,10 @@ describe('Project Upgrades', () => {
   });
 
   describe('Upgrade metadata validation', () => {
-    let upgradeService: ProjectUpgradeSevice<ISubqueryProject>;
+    let upgradeService: ProjectUpgradeService<ISubqueryProject>;
 
     beforeEach(async () => {
-      upgradeService = await ProjectUpgradeSevice.create(
+      upgradeService = await ProjectUpgradeService.create(
         {...demoProjects[5], id: '5'},
         (id) => Promise.resolve({...demoProjects[parseInt(id, 10)], id}),
         1
@@ -336,7 +398,7 @@ describe('Project Upgrades', () => {
     });
 
     it('validates if project doesnt have upgrades', async () => {
-      const upgradeService = await ProjectUpgradeSevice.create(
+      const upgradeService = await ProjectUpgradeService.create(
         demoProjects[0],
         (id) => Promise.resolve(demoProjects[parseInt(id, 10)]),
         1

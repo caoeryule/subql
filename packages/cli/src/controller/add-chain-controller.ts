@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import * as fs from 'fs';
@@ -8,13 +8,15 @@ import {MultichainProjectManifest, ProjectManifestV1_0_0} from '@subql/types-cor
 import {Scalar, Document, parseDocument, YAMLSeq, YAMLMap} from 'yaml';
 
 const nodeToDockerImage: Record<string, string> = {
-  '@subql/node': 'onfinality/subql-node',
-  '@subql/node-ethereum': 'onfinality/subql-node-ethereum',
-  '@subql/node-cosmos': 'onfinality/subql-node-cosmos',
-  '@subql/node-algorand': 'onfinality/subql-node-algorand',
-  '@subql/node-near': 'onfinality/subql-node-near',
+  '@subql/node': 'subquerynetwork/subql-node-substrate',
+  '@subql/node-ethereum': 'subquerynetwork/subql-node-ethereum',
+  '@subql/node-cosmos': 'subquerynetwork/subql-node-cosmos',
+  '@subql/node-algorand': 'subquerynetwork/subql-node-algorand',
+  '@subql/node-near': 'subquerynetwork/subql-node-near',
   '@subql/node-stellar': 'subquerynetwork/subql-node-stellar',
   '@subql/node-concordium': 'subquerynetwork/subql-node-concordium',
+  '@subql/node-starknet': 'subquerynetwork/subql-node-starknet',
+  '@subql/node-solana': 'subquerynetwork/subql-node-solana',
 };
 
 type DockerComposeDependsOn = {
@@ -26,7 +28,7 @@ type DockerComposeEnvironment = {
 };
 
 type DockerComposeHealthcheck = {
-  test: Array<string | 'CMD'>;
+  test: ['CMD', ...string[]];
   interval: string;
   timeout: string;
   retries: number;
@@ -241,9 +243,12 @@ export async function updateDockerCompose(projectDir: string, chainManifestPath:
   let subqlNodeService = getSubqlNodeService(dockerCompose);
   if (subqlNodeService) {
     // If the service already exists, update its configuration
-    subqlNodeService.command = subqlNodeService.command.filter((cmd) => !cmd.startsWith('-f='));
+    subqlNodeService.command = subqlNodeService.command?.filter((cmd) => !cmd.startsWith('-f=')) ?? [];
     subqlNodeService.command.push(`-f=app/${path.basename(chainManifestPath)}`);
-    subqlNodeService.healthcheck.test = ['CMD', 'curl', '-f', `http://${serviceName}:3000/ready`];
+
+    if (subqlNodeService.healthcheck) {
+      subqlNodeService.healthcheck.test = ['CMD', 'curl', '-f', `http://${serviceName}:3000/ready`];
+    }
   } else {
     // Otherwise, create a new service configuration
     subqlNodeService = await getDefaultServiceConfiguration(chainManifestPath, serviceName);

@@ -1,13 +1,21 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import { NestFactory } from '@nestjs/core';
 import { notifyUpdates } from '@subql/common';
-import { getLogger, getValidPort, NestLogger } from '@subql/node-core';
+import {
+  exitWithError,
+  getLogger,
+  getValidPort,
+  IBlockchainService,
+  NestLogger,
+  ProjectService,
+  FetchService,
+  DictionaryService,
+} from '@subql/node-core';
 import { AppModule } from './app.module';
-import { ApiService } from './indexer/api.service';
-import { FetchService } from './indexer/fetch.service';
-import { ProjectService } from './indexer/project.service';
+import { SubstrateDictionaryService } from './indexer/dictionary';
+import { RuntimeService } from './indexer/runtime/runtimeService';
 import { yargsOptions } from './yargs';
 
 const pjson = require('../package.json');
@@ -29,12 +37,19 @@ export async function bootstrap(): Promise<void> {
 
     const projectService: ProjectService = app.get('IProjectService');
     const fetchService = app.get(FetchService);
-    const apiService = app.get(ApiService);
+    const runtimeService: RuntimeService = app.get('RuntimeService');
+    const dictionaryService: SubstrateDictionaryService =
+      app.get(DictionaryService);
+    const blockchainService: IBlockchainService = app.get('IBlockchainService');
 
     // Initialise async services, we do this here rather than in factories, so we can capture one off events
-    await apiService.init();
     await projectService.init();
-    await fetchService.init(projectService.startHeight);
+
+    const startHeight = projectService.startHeight;
+    const { blockHeight: finalizedHeight } =
+      await blockchainService.getFinalizedHeader();
+    await runtimeService.init(startHeight, finalizedHeight, dictionaryService);
+    await fetchService.init(startHeight);
 
     app.enableShutdownHooks();
 
@@ -42,7 +57,6 @@ export async function bootstrap(): Promise<void> {
 
     logger.info(`Node started on port: ${port}`);
   } catch (e) {
-    logger.error(e, 'Node failed to start');
-    process.exit(1);
+    exitWithError(new Error(`Node failed to start`, { cause: e }), logger);
   }
 }

@@ -1,12 +1,14 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {EventEmitter2} from '@nestjs/event-emitter';
 import {delay} from '@subql/common';
 import {Sequelize} from '@subql/x-sequelize';
+import {range} from 'lodash';
 import {NodeConfig} from '../../configure';
-import {MetadataFactory, PlainPoiModel, PoiFactory} from '../../indexer';
+import {MetadataFactory, PoiFactory, ProofOfIndex} from '../../indexer';
 import {Queue} from '../../utils';
+import {PlainPoiModel} from '../storeModelProvider/poi';
 import {ISubqueryProject} from '../types';
 import {PoiSyncService} from './poiSync.service';
 
@@ -205,7 +207,7 @@ describe('Poi Service sync', () => {
     await poiSyncService.syncPoi(102);
     expect(spyOnPoiCreation).toHaveBeenCalled();
     expect(spyOnCreateDefaultBlock).not.toHaveBeenCalled();
-  }, 50000);
+  });
 
   it('sync poi block in discontinuous range,should get default block created', async () => {
     await createGenesisPoi(poiSyncService);
@@ -242,7 +244,7 @@ describe('Poi Service sync', () => {
     expect(spyOnCreateDefaultBlock).toHaveBeenCalledTimes(1);
     // Set block 101,102,103,104,105
     expect(spyOnSetLatestSyncedPoi).toHaveBeenCalledTimes(5);
-  }, 50000);
+  });
 
   it('if sync poi block out of order, it will throw', async () => {
     await createGenesisPoi(poiSyncService);
@@ -273,7 +275,7 @@ describe('Poi Service sync', () => {
         },
       ])
     ).rejects.toThrow(/Sync poi block out of order, latest synced poi height/);
-  }, 50000);
+  });
 
   it('could stop sync and clear', async () => {
     await createGenesisPoi(poiSyncService);
@@ -317,5 +319,103 @@ describe('Poi Service sync', () => {
     expect((poiSyncService as any)._latestSyncedPoi).toBeUndefined();
     // Should be empty
     expect((poiSyncService as any).syncedPoiQueue.size).toBe(0);
-  }, 500000);
+  });
+
+  it('found SyncedProofOfIndex is not complete will throw', async () => {
+    // await createGenesisPoi(poiSyncService);
+    // mock poi repo
+    const genesisPoi = {
+      id: 100,
+      chainBlockHash: new Uint8Array(),
+      hash: new Uint8Array(),
+      parentHash: null,
+      operationHashRoot: new Uint8Array(),
+    };
+    (poiSyncService as any)._poiRepo = {
+      getPoiById: (id = 100) => {
+        return genesisPoi;
+      },
+      getFirst: () => {
+        return genesisPoi;
+      },
+      bulkUpsert: jest.fn(),
+      getPoiBlocksByRange: jest.fn(),
+    };
+    (poiSyncService as any)._projectId = 'test';
+    (poiSyncService as any).updateMetadataSyncedPoi = jest.fn(); // Mock upsert metadata
+    (poiSyncService as any).getMetadataLatestSyncedPoi = jest.fn(() => 100);
+    await (poiSyncService as any).ensureGenesisPoi();
+    await expect((poiSyncService as any).syncLatestSyncedPoiFromDb()).rejects.toThrow();
+    poiSyncService.poiRepo.bulkUpsert = jest.fn();
+  });
+});
+
+describe('Independent Poi Service sync', () => {
+  let poiSyncService: PoiSyncService;
+
+  beforeEach(async () => {
+    poiSyncService = await createPoiSyncService();
+  });
+
+  afterAll(() => {
+    poiSyncService.stopSync();
+    poiSyncService.onApplicationShutdown();
+  });
+
+  function mockProofOfIndexes(start: number, end: number): ProofOfIndex[] {
+    return range(start, end + 1).map((i) => ({
+      id: i,
+      chainBlockHash: new Uint8Array(),
+      operationHashRoot: new Uint8Array(),
+      hash: new Uint8Array(),
+      parentHash: new Uint8Array(),
+    }));
+  }
+
+  it('should stop sync as soon when stopSync is called', async () => {
+    const poiBlocks: ProofOfIndex[] = mockProofOfIndexes(4, 100);
+
+    poiSyncService.poiRepo.getPoiBlocksByRange = jest.fn(async () => {
+      return Promise.resolve(poiBlocks);
+    });
+
+    (poiSyncService as any).ensureGenesisPoi = jest.fn(async () => {
+      return Promise.resolve(1);
+    });
+
+    // mock last synced poi is 2
+    (poiSyncService as any)._latestSyncedPoi = mockProofOfIndexes(2, 2)[0];
+
+    // this is important, we mock in syncPoiJob this stepes take longer to resolve
+    // then we can shut down during for loop waiting time
+    (poiSyncService as any).syncedPoiQueueAppend = jest.fn(async () => {
+      await delay(1);
+      return 1;
+    });
+
+    const syncPoiJobSpy = jest.spyOn(poiSyncService as any, 'syncPoiJob');
+
+    // before start sync, latestSyncedPoi is 2
+    expect(poiSyncService.latestSyncedPoi.id).toBe(2);
+
+    // Start sync in a separate promise to simulate async behavior
+    const syncPromise = poiSyncService.syncPoi();
+
+    // We simulate let sync job keep going for a while
+    await delay(2);
+    // Call stopSync to stop the loop
+    await poiSyncService.stopSync();
+
+    // Wait for the syncPoi method to complete
+    await syncPromise;
+
+    // Verify that the loop was stopped
+    expect((poiSyncService as any).isShutdown).toBe(true);
+    expect(syncPoiJobSpy).toHaveBeenCalled();
+
+    // stopped sync, latestSyncedPoi should be changed, like 10
+    expect(poiSyncService.latestSyncedPoi.id).toBeGreaterThan(2);
+    // And it also should never sync to the end
+    expect(poiSyncService.latestSyncedPoi.id).not.toBe(100);
+  }, 50000);
 });

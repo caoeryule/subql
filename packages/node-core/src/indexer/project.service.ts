@@ -1,31 +1,29 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'assert';
 import {isMainThread} from 'worker_threads';
+import {Inject} from '@nestjs/common';
 import {EventEmitter2} from '@nestjs/event-emitter';
 import {BaseDataSource, IProjectNetworkConfig} from '@subql/types-core';
 import {Sequelize} from '@subql/x-sequelize';
 import {IApi} from '../api.service';
+import {ICoreBlockchainService} from '../blockchain.service';
 import {IProjectUpgradeService, NodeConfig} from '../configure';
 import {IndexerEvent} from '../events';
 import {getLogger} from '../logger';
-import {
-  getExistingProjectSchema,
-  getStartHeight,
-  hasValue,
-  initDbSchema,
-  initHotSchemaReload,
-  mainThreadOnly,
-  reindex,
-} from '../utils';
+import {exitWithError, monitorWrite} from '../process';
+import {getExistingProjectSchema, getStartHeight, hasValue, mainThreadOnly, reindex} from '../utils';
 import {BlockHeightMap} from '../utils/blockHeightMap';
-import {BaseDsProcessorService} from './ds-processor.service';
+import {DsProcessorService} from './ds-processor.service';
 import {DynamicDsService} from './dynamic-ds.service';
+import {MetadataKeys} from './entities';
+import {MultiChainRewindService} from './multiChainRewind.service';
 import {PoiSyncService} from './poi';
 import {PoiService} from './poi/poi.service';
 import {StoreService} from './store.service';
-import {ISubqueryProject, IProjectService} from './types';
+import {cacheProviderFlushData} from './storeModelProvider';
+import {ISubqueryProject, IProjectService, BypassBlocks, HistoricalMode, Header} from './types';
 import {IUnfinalizedBlocksService} from './unfinalizedBlocks.service';
 
 const logger = getLogger('Project');
@@ -36,33 +34,31 @@ class NotInitError extends Error {
   }
 }
 
-export abstract class BaseProjectService<
-  API extends IApi,
-  DS extends BaseDataSource,
-  UnfinalizedBlocksService extends IUnfinalizedBlocksService<any> = IUnfinalizedBlocksService<any>
+export class ProjectService<
+  DS extends BaseDataSource = BaseDataSource,
+  API extends IApi = IApi,
+  UnfinalizedBlocksService extends IUnfinalizedBlocksService<any> = IUnfinalizedBlocksService<any>,
 > implements IProjectService<DS>
 {
   private _schema?: string;
   private _startHeight?: number;
   private _blockOffset?: number;
 
-  protected abstract packageVersion: string;
-  protected abstract getBlockTimestamp(height: number): Promise<Date>;
-  protected abstract onProjectChange(project: ISubqueryProject<IProjectNetworkConfig, DS>): void | Promise<void>;
-
   constructor(
-    private readonly dsProcessorService: BaseDsProcessorService,
-    protected readonly apiService: API,
-    private readonly poiService: PoiService,
-    private readonly poiSyncService: PoiSyncService,
-    protected readonly sequelize: Sequelize,
-    protected readonly project: ISubqueryProject<IProjectNetworkConfig, DS>,
-    protected readonly projectUpgradeService: IProjectUpgradeService<ISubqueryProject>,
-    protected readonly storeService: StoreService,
-    protected readonly nodeConfig: NodeConfig,
-    protected readonly dynamicDsService: DynamicDsService<DS>,
+    private readonly dsProcessorService: DsProcessorService,
+    @Inject('APIService') protected readonly apiService: API,
+    @Inject(isMainThread ? PoiService : 'Null') private readonly poiService: PoiService,
+    @Inject(isMainThread ? PoiSyncService : 'Null') private readonly poiSyncService: PoiSyncService,
+    @Inject(isMainThread ? Sequelize : 'Null') private readonly sequelize: Sequelize,
+    @Inject('ISubqueryProject') private readonly project: ISubqueryProject<IProjectNetworkConfig, DS>,
+    @Inject('IProjectUpgradeService') private readonly projectUpgradeService: IProjectUpgradeService<ISubqueryProject>,
+    @Inject(isMainThread ? StoreService : 'Null') private readonly storeService: StoreService,
+    private readonly nodeConfig: NodeConfig,
+    private readonly dynamicDsService: DynamicDsService<DS>,
     private eventEmitter: EventEmitter2,
-    protected readonly unfinalizedBlockService: UnfinalizedBlocksService
+    @Inject('IUnfinalizedBlocksService') private readonly unfinalizedBlockService: UnfinalizedBlocksService,
+    @Inject('IBlockchainService') private blockchainService: ICoreBlockchainService<DS>,
+    @Inject(isMainThread ? MultiChainRewindService : 'Null') private multiChainRewindService: MultiChainRewindService
   ) {
     if (this.nodeConfig.unsafe) {
       logger.warn(
@@ -85,17 +81,23 @@ export abstract class BaseProjectService<
     return this._blockOffset;
   }
 
-  protected get isHistorical(): boolean {
+  get bypassBlocks(): BypassBlocks {
+    return this.project.network.bypassBlocks ?? [];
+  }
+
+  protected get isHistorical(): HistoricalMode {
     return this.storeService.historical;
   }
 
-  private async getExistingProjectSchema(): Promise<string | undefined> {
+  protected async getExistingProjectSchema(): Promise<string | undefined> {
     return getExistingProjectSchema(this.nodeConfig, this.sequelize);
   }
 
   async init(startHeight?: number): Promise<void> {
-    for await (const [, project] of this.projectUpgradeService.projects) {
-      await project.applyCronTimestamps(this.getBlockTimestamp.bind(this));
+    this.ensureTimezone();
+
+    for (const [, project] of this.projectUpgradeService.projects) {
+      await project.applyCronTimestamps(this.blockchainService.getBlockTimestamp.bind(this));
     }
 
     // Do extra work on main thread to setup stuff
@@ -104,15 +106,26 @@ export abstract class BaseProjectService<
 
       // Init metadata before rest of schema so we can determine the correct project version to create the schema
       await this.storeService.initCoreTables(this._schema);
-      await this.dynamicDsService.init(this.storeService.storeCache.metadata);
+
       await this.ensureMetadata();
-      const reindexedUpgrade = await this.initUpgradeService();
+      // DynamicDsService is dependent on metadata so we need to ensure it exists first
+      await this.dynamicDsService.init(this.storeService.modelProvider.metadata);
 
+      /**
+       * WARNING: The order of the following steps is very important.
+       *  * The right project needs to be used based on the start height which can change depending on rewinds
+       *  * The DB needs to be init for unfinalized and project upgrades to run any rewinds
+       * */
+
+      this._startHeight = await this.nextProcessHeight();
+
+      // Nothing is indexed, the first project is the default so we can use that start height
+      if (this._startHeight === undefined) {
+        this._startHeight = this.projectUpgradeService.currentHeight;
+      }
+
+      // These need to be init before upgrade and unfinalized services because they may cause rewinds.
       await this.initDbSchema();
-
-      await this.initHotSchemaReload();
-
-      this._startHeight = await this.getStartHeight();
 
       if (this.nodeConfig.proofOfIndex) {
         // Prepare for poi migration and creation
@@ -122,27 +135,46 @@ export abstract class BaseProjectService<
         void this.poiSyncService.syncPoi(undefined);
       }
 
+      const reindexedUpgrade = await this.initUpgradeService(this.startHeight);
+
+      const reindexMultiChain = await this.initMultiChainRewindService();
+
       // Unfinalized is dependent on POI in some cases, it needs to be init after POI is init
       const reindexedUnfinalized = await this.initUnfinalizedInternal();
 
-      // Find the new start height based on some rewinding
-      this._startHeight = Math.min(...[this._startHeight, reindexedUpgrade, reindexedUnfinalized].filter(hasValue));
+      if (reindexedUnfinalized !== undefined) {
+        this._startHeight = reindexedUnfinalized.blockHeight;
+      }
 
-      // Set the start height so the right project is used
-      await this.projectUpgradeService.setCurrentHeight(this._startHeight);
+      if (reindexedUpgrade !== undefined) {
+        this._startHeight = reindexedUpgrade;
+      }
+
+      if (reindexMultiChain !== undefined) {
+        this._startHeight = reindexMultiChain.blockHeight;
+      }
 
       // Flush any pending operations to set up DB
-      await this.storeService.storeCache.flushCache(true, true);
+      await cacheProviderFlushData(this.storeService.modelProvider, true);
     } else {
-      assert(startHeight, 'ProjectService must be initalized with a start height in workers');
+      assert(startHeight, 'ProjectService must be initialized with a start height in workers');
       this.projectUpgradeService.initWorker(startHeight, this.handleProjectChange.bind(this));
 
       // Called to allow handling the first project
-      await this.onProjectChange(this.project);
+      await this.blockchainService.onProjectChange(this.project);
     }
 
     // Used to load assets into DS-processor, has to be done in any thread
     await this.dsProcessorService.validateProjectCustomDatasources(await this.getDataSources());
+  }
+
+  private ensureTimezone(): void {
+    const timezone = process.env.TZ;
+    if (!timezone || timezone.toLowerCase() !== 'utc') {
+      throw new Error(
+        'Environment Timezone is not set to UTC. This may cause issues with indexing or proof of index\n Please try to set with "export TZ=UTC"'
+      );
+    }
   }
 
   private async ensureProject(): Promise<string> {
@@ -167,20 +199,18 @@ export abstract class BaseProjectService<
     return schema;
   }
 
-  private async initHotSchemaReload(): Promise<void> {
-    await initHotSchemaReload(this.schema, this.storeService);
-  }
-
   private async initDbSchema(): Promise<void> {
-    await initDbSchema(this.project, this.schema, this.storeService);
+    const tx = await this.sequelize.transaction();
+    await this.storeService.init(this.schema, tx);
+    await tx.commit();
   }
 
   private async ensureMetadata(): Promise<void> {
-    const metadata = this.storeService.storeCache.metadata;
+    const metadata = this.storeService.modelProvider.metadata;
 
     this.eventEmitter.emit(IndexerEvent.NetworkMetadata, this.apiService.networkMeta);
 
-    const keys = [
+    const keys: (keyof MetadataKeys)[] = [
       'lastProcessedHeight',
       'blockOffset',
       'indexerNodeVersion',
@@ -191,7 +221,8 @@ export abstract class BaseProjectService<
       'processedBlockCount',
       'lastFinalizedVerifiedHeight',
       'schemaMigrationCount',
-    ] as const;
+      'dynamicDatasources',
+    ];
 
     const existing = await metadata.findMany(keys);
 
@@ -200,7 +231,7 @@ export abstract class BaseProjectService<
     if (this.project.runner) {
       const {node, query} = this.project.runner;
 
-      metadata.setBulk([
+      await metadata.setBulk([
         {key: 'runnerNode', value: node.name},
         {key: 'runnerNodeVersion', value: node.version},
         {key: 'runnerQuery', value: query.name},
@@ -208,7 +239,7 @@ export abstract class BaseProjectService<
       ]);
     }
     if (!existing.genesisHash) {
-      metadata.set('genesisHash', genesisHash);
+      await metadata.set('genesisHash', genesisHash);
     } else {
       // Check if the configured genesisHash matches the currently stored genesisHash
       assert(
@@ -217,57 +248,59 @@ export abstract class BaseProjectService<
       );
     }
     if (existing.chain !== chain) {
-      metadata.set('chain', chain);
+      await metadata.set('chain', chain);
     }
 
     if (existing.specName !== specName) {
-      metadata.set('specName', specName);
+      await metadata.set('specName', specName);
     }
 
     // If project was created before this feature, don't add the key. If it is project created after, add this key.
     if (!existing.processedBlockCount && !existing.lastProcessedHeight) {
-      metadata.set('processedBlockCount', 0);
+      await metadata.set('processedBlockCount', 0);
     }
-
-    if (existing.indexerNodeVersion !== this.packageVersion) {
-      metadata.set('indexerNodeVersion', this.packageVersion);
+    if (existing.indexerNodeVersion !== this.blockchainService.packageVersion) {
+      await metadata.set('indexerNodeVersion', this.blockchainService.packageVersion);
     }
     if (!existing.schemaMigrationCount) {
-      metadata.set('schemaMigrationCount', 0);
+      await metadata.set('schemaMigrationCount', 0);
     }
     if (!existing.startHeight) {
-      metadata.set('startHeight', this.getStartBlockFromDataSources());
+      await metadata.set('startHeight', this.getStartBlockFromDataSources());
+    }
+
+    if (!existing.dynamicDatasources) {
+      await metadata.set('dynamicDatasources', []);
+    } else if (typeof existing.dynamicDatasources === 'string') {
+      // Migration Step: In versions  < 4.7.2 dynamic datasources was stored as a string in a json field.
+      logger.info('Migrating dynamic datasources from string to object');
+      await metadata.set('dynamicDatasources', JSON.parse(existing.dynamicDatasources));
     }
   }
 
   protected async getLastProcessedHeight(): Promise<number | undefined> {
-    return this.storeService.storeCache.metadata.find('lastProcessedHeight');
+    return this.storeService.modelProvider.metadata.find('lastProcessedHeight');
   }
 
-  private async getStartHeight(): Promise<number> {
-    let startHeight: number;
+  private async nextProcessHeight(): Promise<number | undefined> {
     const lastProcessedHeight = await this.getLastProcessedHeight();
 
     if (hasValue(lastProcessedHeight)) {
-      startHeight = Number(lastProcessedHeight) + 1;
-    } else {
-      startHeight = this.getStartBlockFromDataSources();
+      return Number(lastProcessedHeight) + 1;
     }
-    return startHeight;
+    return undefined;
   }
 
   getStartBlockFromDataSources(): number {
     try {
       return getStartHeight(this.project.dataSources);
     } catch (e: any) {
-      logger.error(e);
-      process.exit(1);
+      exitWithError(e, logger);
     }
   }
 
-  // This is used everywhere but within indexing blocks, see comment on getDataSources for more info
   getAllDataSources(): DS[] {
-    assert(isMainThread, 'This method is only avaiable on the main thread');
+    assert(isMainThread, 'This method is only available on the main thread');
     const dataSources = this.project.dataSources;
     const dynamicDs = this.dynamicDsService.dynamicDatasources;
 
@@ -286,7 +319,6 @@ export abstract class BaseProjectService<
     return [...dataSources.entries()].some(([dsHeight, ds]) => dsHeight > height && ds.length);
   }
 
-  // This gets used when indexing blocks, it needs to be async to ensure dynamicDs is updated within workers
   async getDataSources(blockHeight?: number): Promise<DS[]> {
     const dataSources = this.project.dataSources;
     const dynamicDs = await this.dynamicDsService.getDynamicDatasources();
@@ -342,7 +374,11 @@ export abstract class BaseProjectService<
       const sortedEvents = events.sort((a, b) => a.block - b.block || Number(b.start) - Number(a.start));
 
       sortedEvents.forEach((event) => {
-        event.start ? activeDataSources.add(event.ds) : activeDataSources.delete(event.ds);
+        if (event.start) {
+          activeDataSources.add(event.ds);
+        } else {
+          activeDataSources.delete(event.ds);
+        }
         dsMap.set(event.block, Array.from(activeDataSources));
       });
     }
@@ -350,28 +386,37 @@ export abstract class BaseProjectService<
     return new BlockHeightMap(dsMap);
   }
 
-  private async initUnfinalizedInternal(): Promise<number | undefined> {
+  private async initUnfinalizedInternal(): Promise<Header | undefined> {
     if (this.nodeConfig.unfinalizedBlocks && !this.isHistorical) {
-      logger.error(
-        'Unfinalized blocks cannot be enabled without historical. You will need to reindex your project to enable historical'
+      exitWithError(
+        'Unfinalized blocks cannot be enabled without historical. You will need to reindex your project to enable historical',
+        logger
       );
-      process.exit(1);
     }
 
     return this.initUnfinalized();
   }
 
-  protected async initUnfinalized(): Promise<number | undefined> {
+  protected async initUnfinalized(): Promise<Header | undefined> {
     return this.unfinalizedBlockService.init(this.reindex.bind(this));
   }
 
-  private async initUpgradeService(): Promise<number | undefined> {
-    const metadata = this.storeService.storeCache.metadata;
-
-    const upgradePoint = await this.projectUpgradeService.init(metadata, this.handleProjectChange.bind(this));
+  /**
+   * If the source project has changed this will align the ancestry of project upgrades. This can result in data being reindexed
+   * @returns {number | undefined} - The height to continue indexing from
+   * */
+  private async initUpgradeService(startHeight: number): Promise<number | undefined> {
+    const upgradePoint = await this.projectUpgradeService.init(
+      this.storeService,
+      startHeight,
+      this.nodeConfig,
+      this.sequelize,
+      this.schema,
+      this.handleProjectChange.bind(this)
+    );
 
     // Called to allow handling the first project
-    await this.onProjectChange(this.project);
+    await this.blockchainService.onProjectChange(this.project);
 
     if (isMainThread) {
       const lastProcessedHeight = await this.getLastProcessedHeight();
@@ -385,47 +430,64 @@ export abstract class BaseProjectService<
       } else {
         if (lastProcessedHeight && upgradePoint < lastProcessedHeight) {
           if (!this.isHistorical) {
-            logger.error(
+            exitWithError(
               `Unable to upgrade project. Cannot rewind to block ${upgradePoint} without historical indexing enabled.`
             );
-            process.exit(1);
           }
-          logger.info(`Rewinding project to preform project upgrade. Block height="${upgradePoint}"`);
-          await this.reindex(upgradePoint);
-          return upgradePoint;
+          if (!this.projectUpgradeService.isRewindable) {
+            exitWithError(`Due to dropped changes in schema migration, project cannot rewind`, logger);
+          }
+          const msg = `Rewinding project to preform project upgrade. Block height="${upgradePoint}"`;
+          logger.info(msg);
+          monitorWrite(msg);
+
+          const timestamp = await this.blockchainService.getBlockTimestamp(upgradePoint);
+          // Only timestamp and blockHeight are used with reindexing so its safe to convert to a header
+          await this.reindex({
+            blockHeight: upgradePoint,
+            timestamp,
+          } as Header);
+          return upgradePoint + 1;
         }
       }
     }
     return undefined;
   }
+  private async initMultiChainRewindService(): Promise<Header | undefined> {
+    return this.multiChainRewindService.init(this.apiService.networkMeta.chain, this.reindex.bind(this));
+  }
 
   private async handleProjectChange(): Promise<void> {
-    // Apply any migrations to the schema
-    if (isMainThread) {
+    if (isMainThread && !this.nodeConfig.allowSchemaMigration) {
       await this.initDbSchema();
     }
 
     // Reload the dynamic ds with new project
     await this.dynamicDsService.getDynamicDatasources(true);
 
-    await this.onProjectChange(this.project);
+    await this.blockchainService.onProjectChange(this.project);
   }
 
-  async reindex(targetBlockHeight: number): Promise<void> {
-    const lastProcessedHeight = await this.getLastProcessedHeight();
+  async reindex(targetBlockHeader: Header): Promise<void> {
+    const [height, timestamp] = await Promise.all([
+      this.getLastProcessedHeight(),
+      this.storeService.modelProvider.metadata.find('lastProcessedBlockTimestamp'),
+    ]);
 
-    if (lastProcessedHeight === undefined) {
+    if (height === undefined) {
       throw new Error('Cannot reindex with missing lastProcessedHeight');
     }
 
     return reindex(
       this.getStartBlockFromDataSources(),
-      targetBlockHeight,
-      lastProcessedHeight,
+      targetBlockHeader,
+      {height, timestamp},
       this.storeService,
       this.unfinalizedBlockService,
       this.dynamicDsService,
       this.sequelize,
+      this.projectUpgradeService,
+      this.multiChainRewindService,
       this.nodeConfig.proofOfIndex ? this.poiService : undefined
       /* Not providing force clean service, it should never be needed */
     );

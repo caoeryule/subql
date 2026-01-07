@@ -1,36 +1,39 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'assert';
-import {OnApplicationShutdown} from '@nestjs/common';
+import {Inject, Injectable, OnApplicationShutdown} from '@nestjs/common';
 import {EventEmitter2} from '@nestjs/event-emitter';
 import {Interval} from '@nestjs/schedule';
+import {BaseDataSource} from '@subql/types-core';
 import {last} from 'lodash';
+import {IApiConnectionSpecific} from '../../api.service';
+import {IBlockchainService} from '../../blockchain.service';
 import {NodeConfig} from '../../configure';
 import {IProjectUpgradeService} from '../../configure/ProjectUpgrade.service';
 import {IndexerEvent} from '../../events';
-import {PoiSyncService} from '../../indexer';
+import {
+  ConnectionPoolStateManager,
+  createIndexerWorker,
+  DynamicDsService,
+  IBaseIndexerWorker,
+  IBlock,
+  InMemoryCacheService,
+  MultiChainRewindService,
+  PoiSyncService,
+  TerminateableWorker,
+  UnfinalizedBlocksService,
+} from '../../indexer';
 import {getLogger} from '../../logger';
-import {AutoQueue, isTaskFlushedError} from '../../utils';
-import {DynamicDsService} from '../dynamic-ds.service';
-import {PoiService} from '../poi/poi.service';
-import {SmartBatchService} from '../smartBatch.service';
+import {monitorWrite} from '../../process';
+import {AutoQueue} from '../../utils';
+import {MonitorServiceInterface} from '../monitor.service';
 import {StoreService} from '../store.service';
-import {StoreCacheService} from '../storeCache';
-import {ISubqueryProject, IProjectService} from '../types';
-import {isBlockUnavailableError} from '../worker/utils';
+import {IStoreModelProvider} from '../storeModelProvider';
+import {ISubqueryProject, IProjectService, Header} from '../types';
 import {BaseBlockDispatcher} from './base-block-dispatcher';
 
 const logger = getLogger('WorkerBlockDispatcherService');
-
-type Worker = {
-  processBlock: (height: number) => Promise<any>;
-  getStatus: () => Promise<any>;
-  getMemoryLeft: () => Promise<number>;
-  getBlocksLoaded: () => Promise<number>;
-  waitForWorkerBatchSize: (heapSizeInBytes: number) => Promise<void>;
-  terminate: () => Promise<number>;
-};
 
 function initAutoQueue<T>(
   workers: number | undefined,
@@ -39,32 +42,46 @@ function initAutoQueue<T>(
   name?: string
 ): AutoQueue<T> {
   assert(workers && workers > 0, 'Number of workers must be greater than 0');
-  return new AutoQueue(workers * batchSize * 2, 1, timeout, name);
+  const capacity = workers * batchSize * 2;
+  // Concurrency is the same as capacity here, we want maximum throughput
+  return new AutoQueue(capacity, capacity, timeout, name);
 }
 
-export abstract class WorkerBlockDispatcher<DS, W extends Worker>
-  extends BaseBlockDispatcher<AutoQueue<void>, DS>
+@Injectable()
+export class WorkerBlockDispatcher<
+    DS extends BaseDataSource = BaseDataSource,
+    Worker extends IBaseIndexerWorker = IBaseIndexerWorker,
+    Block = any,
+    ApiConn extends IApiConnectionSpecific = IApiConnectionSpecific,
+  >
+  extends BaseBlockDispatcher<AutoQueue<Header>, DS, Block>
   implements OnApplicationShutdown
 {
-  protected workers: W[] = [];
+  protected workers: TerminateableWorker<Worker>[] = [];
   private numWorkers: number;
-  private isShutdown = false;
-  private currentWorkerIndex = 0;
+  private processQueue: AutoQueue<void>;
 
-  protected abstract fetchBlock(worker: W, height: number): Promise<void>;
+  private createWorker: () => Promise<TerminateableWorker<Worker>>;
 
   constructor(
     nodeConfig: NodeConfig,
     eventEmitter: EventEmitter2,
-    projectService: IProjectService<DS>,
-    projectUpgradeService: IProjectUpgradeService,
-    smartBatchService: SmartBatchService,
+    @Inject('IProjectService') projectService: IProjectService<DS>,
+    @Inject('IProjectUpgradeService') projectUpgradeService: IProjectUpgradeService,
     storeService: StoreService,
-    storeCacheService: StoreCacheService,
+    storeModelProvider: IStoreModelProvider,
+    cacheService: InMemoryCacheService,
     poiSyncService: PoiSyncService,
-    project: ISubqueryProject,
     dynamicDsService: DynamicDsService<DS>,
-    private createIndexerWorker: () => Promise<W>
+    unfinalizedBlocksService: UnfinalizedBlocksService<Block>,
+    connectionPoolState: ConnectionPoolStateManager<ApiConn>,
+    @Inject('ISubqueryProject') project: ISubqueryProject,
+    @Inject('IBlockchainService') private blockchainService: IBlockchainService<DS>,
+    multiChainRewindService: MultiChainRewindService,
+    workerPath: string,
+    workerFns: Parameters<typeof createIndexerWorker<Worker, ApiConn, Block, DS>>[1],
+    monitorService?: MonitorServiceInterface,
+    workerData?: unknown
   ) {
     super(
       nodeConfig,
@@ -72,21 +89,46 @@ export abstract class WorkerBlockDispatcher<DS, W extends Worker>
       project,
       projectService,
       projectUpgradeService,
-      initAutoQueue(nodeConfig.workers, nodeConfig.batchSize, nodeConfig.timeout, 'Worker'),
-      smartBatchService,
+      initAutoQueue(nodeConfig.workers, nodeConfig.batchSize, nodeConfig.timeout, 'Fetch'),
       storeService,
-      storeCacheService,
+      storeModelProvider,
       poiSyncService,
-      dynamicDsService
+      blockchainService,
+      multiChainRewindService
     );
+
+    this.processQueue = new AutoQueue(this.queue.capacity, 1, nodeConfig.timeout, 'Process');
+
+    this.createWorker = () =>
+      createIndexerWorker<Worker, ApiConn, Block, DS>(
+        workerPath,
+        workerFns,
+        storeService.getStore(),
+        cacheService.getCache(),
+        dynamicDsService,
+        unfinalizedBlocksService,
+        connectionPoolState,
+        project.root,
+        projectService.startHeight,
+        monitorService,
+        workerData
+      );
     // initAutoQueue will assert that workers is set. unfortunately we cant do anything before the super call
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     this.numWorkers = nodeConfig.workers!;
   }
 
-  async init(onDynamicDsCreated: (height: number) => Promise<void>): Promise<void> {
-    this.workers = await Promise.all(new Array(this.numWorkers).fill(0).map(() => this.createIndexerWorker()));
+  get freeSize(): number {
+    assert(
+      this.queue.freeSpace !== undefined && this.processQueue.freeSpace !== undefined,
+      'Queues for worker block dispatcher must have a capacity set'
+    );
+    // These queues have the same capacity, we need to consider the known items from the queue that will occupy the process queue
+    return this.processQueue.freeSpace - this.queue.size;
+  }
 
+  async init(onDynamicDsCreated: (height: number) => void): Promise<void> {
+    this.workers = await Promise.all(new Array(this.numWorkers).fill(0).map(() => this.createWorker()));
     return super.init(onDynamicDsCreated);
   }
 
@@ -94,6 +136,7 @@ export abstract class WorkerBlockDispatcher<DS, W extends Worker>
     this.isShutdown = true;
     // Stop processing blocks
     this.queue.abort();
+    this.processQueue.abort();
 
     // Stop all workers
     if (this.workers) {
@@ -101,7 +144,12 @@ export abstract class WorkerBlockDispatcher<DS, W extends Worker>
     }
   }
 
-  async enqueueBlocks(heights: number[], latestBufferHeight?: number): Promise<void> {
+  async enqueueBlocks(heights: (IBlock<Block> | number)[], latestBufferHeight?: number): Promise<void> {
+    assert(
+      heights.every((h) => typeof h === 'number'),
+      `Workers don't support full blocks. Because of the dictionary providing full blocks, the workers flag should be removed.`
+    );
+
     // In the case where factors of batchSize is equal to bypassBlock or when heights is []
     // to ensure block is bypassed, we set the latestBufferHeight to the heights
     // make sure lastProcessedHeight in metadata is updated
@@ -109,32 +157,32 @@ export abstract class WorkerBlockDispatcher<DS, W extends Worker>
       heights = [latestBufferHeight];
     }
 
-    logger.info(`Enqueueing blocks ${heights[0]}...${last(heights)}, total ${heights.length} blocks`);
+    logger.info(`Enqueuing blocks ${heights[0]}...${last(heights)}, total ${heights.length} blocks`);
+
+    // Needs to happen before enqueuing heights so discardBlock check works.
+    // Unlike with the normal dispatcher there is not a queue ob blockHeights to delay this.
+    this.latestBufferedHeight = latestBufferHeight ?? last(heights as number[]) ?? this.latestBufferedHeight;
 
     // eslint-disable-next-line no-constant-condition
     if (true) {
-      let startIndex = 0;
-      while (startIndex < heights.length) {
-        const workerIdx = await this.getNextWorkerIndex();
-        const batchSize = Math.min(heights.length - startIndex, await this.maxBatchSize(workerIdx));
-        await Promise.all(
-          heights.slice(startIndex, startIndex + batchSize).map((height) => this.enqueueBlock(height, workerIdx))
-        );
-        startIndex += batchSize;
-      }
+      /*
+       * Load balancing:
+       * worker1: 1,2,3
+       * worker2: 4,5,6
+       */
+      const workerIdx = await this.getNextWorkerIndex();
+      heights.map((height) => this.enqueueBlock(height as number, workerIdx));
     } else {
       /*
        * Load balancing:
        * worker1: 1,3,5
        * worker2: 2,4,6
        */
-      heights.map(async (height) => this.enqueueBlock(height, await this.getNextWorkerIndex()));
+      heights.map(async (height) => this.enqueueBlock(height as number, await this.getNextWorkerIndex()));
     }
-
-    this.latestBufferedHeight = latestBufferHeight ?? last(heights) ?? this.latestBufferedHeight;
   }
 
-  private async enqueueBlock(height: number, workerIdx: number): Promise<void> {
+  private enqueueBlock(height: number, workerIdx: number): void {
     if (this.isShutdown) return;
     const worker = this.workers[workerIdx];
 
@@ -143,55 +191,49 @@ export abstract class WorkerBlockDispatcher<DS, W extends Worker>
     // Used to compare before and after as a way to check if queue was flushed
     const bufferedHeight = this.latestBufferedHeight;
 
-    await worker.waitForWorkerBatchSize(this.minimumHeapLimit);
+    /*
+     Wrap the promise in a fetchQueue for 2 reasons:
+     1. It retains the order when resolving the fetched promises
+     2. It means `this.queue` doesn't fill up with tasks awaiting pendingBlocks which then means we can abort fetching and wait for idle
+    */
+    const pendingBlock = this.queue.put(() =>
+      this.blockchainService.fetchBlockWorker(worker, height, {workers: this.workers})
+    );
 
-    const pendingBlock = this.fetchBlock(worker, height);
-
-    const processBlock = async () => {
-      try {
-        await pendingBlock;
-        if (bufferedHeight > this.latestBufferedHeight) {
-          logger.debug(`Queue was reset for new DS, discarding fetched blocks`);
-          return;
-        }
-
-        await this.preProcessBlock(height);
-
-        const {blockHash, dynamicDsCreated, reindexBlockHeight} = await worker.processBlock(height);
-
-        await this.postProcessBlock(height, {
-          dynamicDsCreated,
-          blockHash,
-          reindexBlockHeight,
-        });
-      } catch (e: any) {
-        // TODO discard any cache changes from this block height
-
-        if (isBlockUnavailableError(e)) {
-          return;
-        }
-        logger.error(
-          e,
-          `failed to index block at height ${height} ${e.handler ? `${e.handler}(${e.stack ?? ''})` : ''}`
-        );
-        process.exit(1);
-      }
-    };
-
-    void this.queue.put(processBlock).catch((e) => {
-      if (isTaskFlushedError(e)) {
-        return;
-      }
-      throw e;
+    void this.pipeBlock({
+      fetchTask: pendingBlock,
+      processBlock: async () => {
+        monitorWrite(`Processing from worker #${workerIdx}`);
+        return worker.processBlock(height);
+      },
+      discardBlock: () => bufferedHeight > this.latestBufferedHeight,
+      processQueue: this.processQueue,
+      abortFetching: async () => {
+        await Promise.all(this.workers.map((w) => w.abortFetching()));
+        // Wait for any pending blocks to be processed
+        this.queue.abort();
+      },
+      getHeader: (header) => header,
+      height,
     });
+  }
+
+  flushQueue(height: number): void {
+    super.flushQueue(height);
+    this.processQueue.flush();
   }
 
   @Interval(15000)
   async sampleWorkerStatus(): Promise<void> {
-    for (const worker of this.workers) {
-      const status = await worker.getStatus();
-      logger.info(JSON.stringify(status));
-    }
+    const statuses = await Promise.all(this.workers.map((worker) => worker.getStatus()));
+    if (!statuses.length) return;
+    logger.info(`
+Host Status:
+  Total Fetching: ${this.queue.size}
+  Awaiting process: ${this.processQueue.size}
+Worker Status:
+  ${statuses.map((s) => `Worker ${s.threadId} - To Fetch: ${s.toFetchBlocks} blocks, Fetched: ${s.fetchedBlocks} blocks`).join('\n  ')}
+`);
   }
 
   // Getter doesn't seem to cary from abstract class
@@ -207,26 +249,13 @@ export abstract class WorkerBlockDispatcher<DS, W extends Worker>
     });
   }
 
+  // Finds the minimum toFetchBlocks amongst workers then randomly selects from onese that have a matching minimum
   private async getNextWorkerIndex(): Promise<number> {
-    const startIndex = this.currentWorkerIndex;
-    do {
-      this.currentWorkerIndex = (this.currentWorkerIndex + 1) % this.workers.length;
-      const memLeft = await this.workers[this.currentWorkerIndex].getMemoryLeft();
-      if (memLeft >= this.minimumHeapLimit) {
-        return this.currentWorkerIndex;
-      }
-    } while (this.currentWorkerIndex !== startIndex);
+    const statuses = await Promise.all(this.workers.map((worker) => worker.getStatus()));
+    const metric = statuses.map((s) => s.toFetchBlocks);
+    const lowest = statuses.filter((s) => s.toFetchBlocks === Math.min(...metric));
+    const randIndex = Math.floor(Math.random() * lowest.length);
 
-    // All workers have been tried and none have enough memory left.
-    // wait for any worker to free the memory before calling getNextWorkerIndex again
-    await Promise.race(this.workers.map((worker) => worker.waitForWorkerBatchSize(this.minimumHeapLimit)));
-
-    return this.getNextWorkerIndex();
-  }
-
-  private async maxBatchSize(workerIdx: number): Promise<number> {
-    const memLeft = await this.workers[workerIdx].getMemoryLeft();
-    if (memLeft < this.minimumHeapLimit) return 0;
-    return this.smartBatchService.safeBatchSizeForRemainingMemory(memLeft);
+    return lowest[randIndex].threadId - 1;
   }
 }

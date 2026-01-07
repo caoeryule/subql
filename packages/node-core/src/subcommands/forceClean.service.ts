@@ -1,13 +1,14 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {Inject, Injectable} from '@nestjs/common';
 import {getAllEntitiesRelations} from '@subql/utils';
 import {QueryTypes, Sequelize} from '@subql/x-sequelize';
 import {NodeConfig} from '../configure';
+import {MonitorService} from '../indexer';
 import {ISubqueryProject} from '../indexer/types';
 import {getLogger} from '../logger';
-import {enumNameToHash, getEnumDeprecated, getExistingProjectSchema} from '../utils';
+import {getEnumDeprecated, getExistingProjectSchema, enumNameToHash} from '../utils';
 
 const logger = getLogger('Force-clean');
 
@@ -65,8 +66,8 @@ export class ForceCleanService {
           }
         );
       }
-
       logger.info('force cleaned schema and tables');
+      MonitorService.forceClean(this.nodeConfig.monitorOutDir);
     } catch (err: any) {
       logger.error(err, 'failed to force clean');
       throw err;

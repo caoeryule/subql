@@ -1,9 +1,10 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {Entity} from '@subql/types-core';
 import {getTypeByScalarName, GraphQLModelsType, u8aConcat, u8aToBuffer, isString} from '@subql/utils';
 import MerkleTools from 'merkle-tools';
+import {monitorWrite} from '../process';
 import {OperationEntity, OperationType} from './types';
 
 export class StoreOperations {
@@ -39,7 +40,14 @@ export class StoreOperations {
             throw new Error('Unable to get type by scalar name');
           }
 
-          dataBufferArray.push(type.hashCode(fieldValue));
+          // This should be done for all types when we have an array, but for backwards compatibility this is only for BigInt, Date and Bytes as using an array would throw an error.
+          if (field.isArray && ['BigInt', 'Bytes', 'Date'].includes(type.name)) {
+            for (const item of fieldValue as Array<any>) {
+              dataBufferArray.push(type.hashCode(item));
+            }
+          } else {
+            dataBufferArray.push(type.hashCode(fieldValue));
+          }
         }
       }
     }
@@ -52,6 +60,12 @@ export class StoreOperations {
       entityType: entity,
       data: data,
     };
+    // skip full data, should write in higher level
+    monitorWrite(
+      `-- [POI][StoreOperations][put] ${operation} entity ${entity}, data/id: ${
+        typeof data === 'string' ? data : data.id
+      }`
+    );
     this.merkleTools.addLeaf(u8aToBuffer(this.operationEntityToUint8Array(operationEntity)), true);
   }
 

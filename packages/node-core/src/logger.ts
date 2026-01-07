@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {isMainThread, threadId} from 'node:worker_threads';
@@ -42,7 +42,7 @@ export function setDebugFilter(debug: string | undefined): void {
 }
 
 export class NestLogger implements LoggerService {
-  private logger = logger.getLogger(`nestjs${isMainThread ? '' : `-#${threadId}`}`);
+  private logger = getLogger(`nestjs`);
 
   constructor(private readonly debugLevel = false) {}
 
@@ -67,10 +67,5 @@ export class NestLogger implements LoggerService {
   debug(message: any): void {
     if (!this.debugLevel) return;
     this.logger.debug(message);
-  }
-
-  verbose(message: any): void {
-    if (!this.debugLevel) return;
-    this.logger.verbose(message);
   }
 }

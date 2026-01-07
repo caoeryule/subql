@@ -1,14 +1,14 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import {threadId} from 'node:worker_threads';
 import {BaseDataSource} from '@subql/types-core';
 import {IProjectUpgradeService, NodeConfig} from '../../configure';
 import {getLogger} from '../../logger';
-import {AutoQueue, isTaskFlushedError, memoryLock} from '../../utils';
+import {monitorWrite} from '../../process';
+import {AutoQueue, isTaskFlushedError, RampQueue} from '../../utils';
 import {ProcessBlockResponse} from '../blockDispatcher';
-import {IProjectService} from '../types';
-import {BlockUnavailableError, isBlockUnavailableError} from './utils';
+import {Header, IBlock, IProjectService} from '../types';
+import {isBlockUnavailableError} from './utils';
 
 export type FetchBlockResponse = {specVersion: number; parentHash: string} | undefined;
 
@@ -19,56 +19,57 @@ export type WorkerStatusResponse = {
   toFetchBlocks: number;
 };
 
-const logger = getLogger(`Worker Service #${threadId}`);
+const logger = getLogger(`WorkerService`);
 
 export abstract class BaseWorkerService<
   B /* BlockContent */,
-  R /* FetchBlockResponse */,
+  R extends Header /* FetchBlockResponse */,
   DS extends BaseDataSource = BaseDataSource,
-  E = {} /* Extra params for fetching blocks. Substrate uses specVersion in here*/
+  E = any /* Extra params for fetching blocks. Substrate uses specVersion in here*/,
 > {
-  private fetchedBlocks: Record<string, B> = {};
+  private fetchedBlocks: Record<string, IBlock<B>> = {};
   private _isIndexing = false;
 
-  private queue: AutoQueue<R>;
+  private queue: AutoQueue<IBlock<B>>;
 
-  protected abstract fetchChainBlock(heights: number, extra: E): Promise<B>;
-  protected abstract toBlockResponse(block: B): R;
-  protected abstract processFetchedBlock(block: B, dataSources: DS[]): Promise<ProcessBlockResponse>;
+  protected abstract fetchChainBlock(heights: number, extra: E): Promise<IBlock<B>>;
+  protected abstract toBlockResponse(block: IBlock<B>): R;
+  protected abstract processFetchedBlock(block: IBlock<B>, dataSources: DS[]): Promise<ProcessBlockResponse>;
+  protected abstract getBlockSize(block: IBlock<B>): number;
 
   constructor(
     private projectService: IProjectService<DS>,
     private projectUpgradeService: IProjectUpgradeService,
     nodeConfig: NodeConfig
   ) {
-    this.queue = new AutoQueue(undefined, nodeConfig.batchSize, nodeConfig.timeout, 'Worker Service');
+    this.queue = new RampQueue(
+      this.getBlockSize.bind(this),
+      nodeConfig.batchSize,
+      undefined,
+      nodeConfig.timeout,
+      'WorkerService'
+    );
   }
 
-  async fetchBlock(height: number, extra: E): Promise<R | undefined> {
+  async fetchBlock(height: number, extra: E): Promise<R> {
     try {
-      return await this.queue.put(async () => {
+      const block = await this.queue.put(async () => {
         // If a dynamic ds is created we might be asked to fetch blocks again, use existing result
         if (!this.fetchedBlocks[height]) {
-          if (memoryLock.isLocked()) {
-            const start = Date.now();
-            await memoryLock.waitForUnlock();
-            const end = Date.now();
-            logger.debug(`memory lock wait time: ${end - start}ms`);
-          }
-
           const block = await this.fetchChainBlock(height, extra);
           this.fetchedBlocks[height] = block;
         }
 
-        const block = this.fetchedBlocks[height];
-        // Return info to get the runtime version, this lets the worker thread know
-        return this.toBlockResponse(block);
+        return this.fetchedBlocks[height];
       });
+
+      // Return info to get the runtime version, this lets the worker thread know
+      return this.toBlockResponse(block);
     } catch (e: any) {
-      if (isTaskFlushedError(e)) {
-        return;
+      if (!isTaskFlushedError(e)) {
+        logger.error(e, `Failed to fetch block ${height}`);
       }
-      logger.error(e, `Failed to fetch block ${height}`);
+      throw e;
     }
   }
 
@@ -90,6 +91,7 @@ export abstract class BaseWorkerService<
     } catch (e: any) {
       if (!isBlockUnavailableError(e)) {
         logger.error(e, `Failed to index block ${height}: ${e.stack}`);
+        monitorWrite(`Failed to index block ${height}: ${e.stack}`);
       }
       throw e;
     } finally {
@@ -107,5 +109,9 @@ export abstract class BaseWorkerService<
 
   get isIndexing(): boolean {
     return this._isIndexing;
+  }
+
+  abortFetching(): void {
+    return this.queue.abort();
   }
 }

@@ -5,6 +5,188 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [2.25.0] - 2025-11-05
+### Changed
+- Replace `express-pino-logger` with the underlying `pino-http` (#2957)
+
+## [2.24.0] - 2025-10-15
+### Changed
+- Minor improvements and fixes from upgrading to eslint 9 with stricter settings (#2929)
+
+## [2.23.6] - 2025-09-16
+### Changed
+- Address some linter related warnings (#2876)
+
+## [2.23.5] - 2025-08-29
+### Fixed
+- Subscriptions with historical enabled (#2897)
+
+## [2.23.4] - 2025-08-25
+### Fixed
+- Subscription error with undefined block height (#2889)
+
+## [2.23.3] - 2025-07-24
+### Changed
+- Improved docker image size (#2866)
+
+## [2.23.2] - 2025-07-17
+### Changed
+- Workspace dependencies now match to patch versions rather than exact (#2855)
+
+## [2.23.1] - 2025-07-02
+### Fixed
+- Filtering out \_Global table (#2840)
+
+## [2.23.0] - 2025-07-01
+### Removed
+- Test files and artifacts from published package (#2838)
+
+## [2.22.2] - 2025-06-25
+### Fixed
+- Playgroung unable to load because of graphiql dependency (#2832)
+
+## [2.22.1] - 2025-05-21
+### Changed
+- Hide \`\_global\` table from being queried (#2799)
+
+## [2.22.0] - 2025-04-30
+### Removed
+- Usage of node-fetch and use fetch instead (#2772)
+
+## [2.21.2] - 2025-04-24
+### Changed
+- Update graphlile utils (#2727)
+
+## [2.21.1] - 2025-03-24
+### Changed
+- Update compression dependency (#2687)
+
+## [2.21.0] - 2025-02-19
+### Changed
+- Update node version to LTS (#2655)
+
+## [2.20.1] - 2025-02-04
+### Changed
+- Update copyright header to 2025
+
+## [2.20.0] - 2025-01-28
+### Fixed
+- Subscriptions `_entity` field now returns all properties (#2626)
+
+## [2.19.0] - 2024-12-11
+### Added
+- Support for ordering with fulltext search (#2623)
+
+## [2.18.0] - 2024-12-04
+### Fixed
+- High CPU usage caused by interval with 0ms (#2614)
+
+### Added
+- Add PgOrderByRelatedPlugin to GraphQL query package
+
+## [2.17.1] - 2024-11-28
+### Fixed
+- Crash with query service subscriptions on multichain projects (#2609)
+
+## [2.17.0] - 2024-11-25
+### Changed
+- WS library with support for graphiql (#2600)
+- Subscription type from JSON to the correct entity type (#2600)
+
+## [2.16.0] - 2024-11-22
+### Changed
+- Update the playground to the latest GraphiQL (#2588)
+
+### Added
+- Support for historical indexing by timestamp as well as block height (#2584)
+
+## [2.15.2] - 2024-09-25
+### Changed
+- Bump common, Added manifest support for query-subgraph.
+
+## [2.15.1] - 2024-08-23
+### Fixed
+- Missing rxjs dependency
+
+## [2.15.0] - 2024-08-23
+### Added
+- Support for null ordering (#2526)
+
+## [2.14.1] - 2024-08-12
+### Fixed
+- Revert yargs version
+
+### Changed
+- Update how idle psql pool connections are handled (#2520)
+
+## [2.14.0] - 2024-08-05
+### Changed
+- Update dependencies (#2518)
+
+### Added
+- add support for null ordering in 'order by' query (#2387)
+
+## [2.13.3] - 2024-07-25
+### Changed
+- Bump version with `@subql/common` and `@subql/utils` (#2498)
+
+## [2.13.2] - 2024-07-09
+### Changed
+- Enable TS strict setting
+
+## [2.13.1] - 2024-06-26
+### Fixed
+- Fixed the aggregate query, type conversion causes precision loss.
+
+## [2.13.0] - 2024-06-21
+### Fixed
+- Fixed query service unable to query dynamic datasource due to change from #2302
+
+### Added
+- enable ts strict mode
+
+## [2.12.1] - 2024-06-12
+### Changed
+- Update `@subql/utils`
+
+## [2.12.0] - 2024-06-12
+### Added
+- Add query `dbSize` under metadata (#2430)
+
+## [2.11.1] - 2024-05-09
+### Fixed
+- Certain historical queries not appliying block height (#2398)
+
+## [2.11.0] - 2024-05-08
+### Changed
+- Bump with @subql/utils, update polkadot dependencies to v11
+
+## [2.10.5] - 2024-05-03
+### Fixed
+- Block height missing from certain historical queries (#2384)
+
+## [2.10.4] - 2024-05-02
+### Changed
+- Update `@subql/utils`
+
+## [2.10.3] - 2024-04-29
+### Fixed
+- Aggregate queries with historical not filtering by block height (#2367)
+
+## [2.10.1] - 2024-04-24
+### Changed
+- Executable path in docker (#2344)
+
+## [2.10.0] - 2024-03-05
+### Added
+- Fulltext search plugin to sanitise search input (#2280)
+
+## [2.9.1] - 2024-02-29
+### Fixed
+- Relation filters not taking into account block height when historical is enabled (#2276)
+
+## [2.9.0] - 2024-01-25
 ### Added
 - gzip compression to queries (#2195)
 
@@ -135,7 +317,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.0] - 2022-07-05
 ### Changed
-- Try to catch error if create server failed, also give retry build schema (#1153)
+- Try to catch error if server creation failed, also give retry build schema (#1153)
 
 ### Fixed
 - Fix tests (#1160)
@@ -150,7 +332,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.1] - 2022-06-02
 ### Changed
-- Now query-complexity is indicated in header (#1088)
+- Now query-complexity is indicated in the header (#1088)
 
 ## [1.1.0] - 2022-05-31
 ### Added
@@ -248,9 +430,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] - 2021-04-20
 ### Added
 - Remove `condition` in query schema, please use `filter` instead (#260)
-- `@jsonField` annotation is now supported in `graphql.schema` which allows you to store structured data JSON data in a single database field
-  - We'll automatically generate coresponding JSON interfaces when querying this data (#275)
-  - Read more about how you can use this in our [updated docs](https://doc.subquery.network/create/graphql.html#json-type)
+- annotation is now supported in
+- We'll automatically generate coresponding JSON interfaces when querying this data (#275)
+- Read more about how you can use this in our [updated docs](https://doc.subquery.network/create/graphql.html#json-type)
 
 ## [0.4.0] - 2021-03-25
 ### Added
@@ -277,9 +459,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - overwrite plugin to fix one to one unique key check
 - update query publish and docker build process
 
-[Unreleased]: https://github.com/subquery/subql/compare/query/2.8.0...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/query/2.25.0...HEAD
+[2.25.0]: https://github.com/subquery/subql/compare/query/2.24.0...query/2.25.0
+[2.24.0]: https://github.com/subquery/subql/compare/query/2.23.6...query/2.24.0
+[2.23.6]: https://github.com/subquery/subql/compare/query/2.23.5...query/2.23.6
+[2.23.5]: https://github.com/subquery/subql/compare/query/2.23.4...query/2.23.5
+[2.23.4]: https://github.com/subquery/subql/compare/query/2.23.3...query/2.23.4
+[2.23.3]: https://github.com/subquery/subql/compare/query/2.23.2...query/2.23.3
+[2.23.2]: https://github.com/subquery/subql/compare/query/2.23.1...query/2.23.2
+[2.23.1]: https://github.com/subquery/subql/compare/query/2.23.0...query/2.23.1
+[2.23.0]: https://github.com/subquery/subql/compare/query/2.22.2...query/2.23.0
+[2.22.2]: https://github.com/subquery/subql/compare/query/2.22.1...query/2.22.2
+[2.22.1]: https://github.com/subquery/subql/compare/query/2.22.0...query/2.22.1
+[2.22.0]: https://github.com/subquery/subql/compare/query/2.21.2...query/2.22.0
+[2.21.2]: https://github.com/subquery/subql/compare/query/2.21.1...query/2.21.2
+[2.21.1]: https://github.com/subquery/subql/compare/query/2.21.0...query/2.21.1
+[2.21.0]: https://github.com/subquery/subql/compare/query/2.20.1...query/2.21.0
+[2.20.1]: https://github.com/subquery/subql/compare/query/2.20.0...query/2.20.1
+[2.20.0]: https://github.com/subquery/subql/compare/query/2.19.0...query/2.20.0
+[2.19.0]: https://github.com/subquery/subql/compare/query/2.18.0...query/2.19.0
+[2.18.0]: https://github.com/subquery/subql/compare/query/2.17.1...query/2.18.0
+[2.17.1]: https://github.com/subquery/subql/compare/query/2.17.0...query/2.17.1
+[2.17.0]: https://github.com/subquery/subql/compare/query/2.16.0...query/2.17.0
+[2.16.0]: https://github.com/subquery/subql/compare/query/2.15.2...query/2.16.0
+[2.15.2]: https://github.com/subquery/subql/compare/query/2.15.1...query/2.15.2
+[2.15.1]: https://github.com/subquery/subql/compare/query/2.15.0...query/2.15.1
+[2.15.0]: https://github.com/subquery/subql/compare/query/2.14.1...query/2.15.0
+[2.14.1]: https://github.com/subquery/subql/compare/query/2.14.0...query/2.14.1
+[2.14.0]: https://github.com/subquery/subql/compare/query/2.13.3...query/2.14.0
+[2.13.3]: https://github.com/subquery/subql/compare/query/2.13.2...query/2.13.3
+[2.13.2]: https://github.com/subquery/subql/compare/query/2.13.1...query/2.13.2
+[2.13.1]: https://github.com/subquery/subql/compare/query/2.13.0...query/2.13.1
+[2.13.0]: https://github.com/subquery/subql/compare/query/2.12.1...query/2.13.0
+[2.12.1]: https://github.com/subquery/subql/compare/query/2.12.0...query/2.12.1
+[2.12.0]: https://github.com/subquery/subql/compare/query/2.11.1...query/2.12.0
+[2.11.1]: https://github.com/subquery/subql/compare/query/2.11.0...query/2.11.1
+[2.11.0]: https://github.com/subquery/subql/compare/query/2.10.5...query/2.11.0
+[2.10.5]: https://github.com/subquery/subql/compare/query/2.10.4...query/2.10.5
+[2.10.4]: https://github.com/subquery/subql/compare/query/2.10.3...query/2.10.4
+[2.10.3]: https://github.com/subquery/subql/compare/query/2.10.1...query/2.10.3
+[2.10.1]: https://github.com/subquery/subql/compare/query/2.10.0...query/2.10.1
+[2.10.0]: https://github.com/subquery/subql/compare/query/2.9.1...query/2.10.0
+[2.9.1]: https://github.com/subquery/subql/compare/query/2.9.0...query/2.9.1
+[2.9.0]: https://github.com/subquery/subql/compare/query/2.8.0...query/2.9.0
 [2.8.0]: https://github.com/subquery/subql/compare/query/2.7.0...query/2.8.0
-[2.7.0]: https://github.com/subquery/subql/compare/query/2.6.0...query2.7.0
+[2.7.0]: https://github.com/subquery/subql/compare/query/2.6.0...query/2.7.0
 [2.6.0]: https://github.com/subquery/subql/compare/query/2.5.0...query/2.6.0
 [2.5.0]: https://github.com/subquery/subql/compare/query/2.4.0...query/2.5.0
 [2.4.0]: https://github.com/subquery/subql/compare/query/2.3.0...query/2.4.0
@@ -287,7 +511,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [2.2.0]: https://github.com/subquery/subql/compare/query/2.1.0...query/2.2.0
 [2.1.0]: https://github.com/subquery/subql/compare/query/2.0.1..query/2.1.0
 [2.0.1]: https://github.com/subquery/subql/compare/query/2.0.0...query/2.0.1
-[2.0.0]: https://github.com/subquery/subql/compare/query/.1.11.2..query/2.0.0
+[2.0.0]: https://github.com/subquery/subql/compare/query/1.11.2..query/2.0.0
 [1.11.2]: https://github.com/subquery/subql/compare/query/1.11.1...query/1.11.2
 [1.11.1]: https://github.com/subquery/subql/compare/query/1.11.0...query/1.11.1
 [1.11.0]: https://github.com/subquery/subql/compare/query/1.10.2...query/1.11.0

@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {existsSync, readdirSync, statSync} from 'fs';
@@ -8,12 +8,11 @@ import {SubqlTest} from '@subql/testing/interfaces';
 import {BaseDataSource, IProjectNetworkConfig} from '@subql/types-core';
 import chalk from 'chalk';
 import {cloneDeep} from 'lodash';
-import {IApi} from '../api.service';
 import {NodeConfig} from '../configure';
 import {getLogger} from '../logger';
 import {SandboxOption, TestSandbox} from './sandbox';
 import {TestRunner} from './test.runner';
-import {ISubqueryProject, IIndexerManager} from './types';
+import {ISubqueryProject, IIndexerManager, IBlock} from './types';
 
 const logger = getLogger('subql-testing');
 
@@ -32,7 +31,10 @@ export abstract class TestingService<A, SA, B, DS extends BaseDataSource> {
   private totalPassedTests = 0;
   private totalFailedTests = 0;
 
-  constructor(protected nodeConfig: NodeConfig, protected project: ISubqueryProject<IProjectNetworkConfig, DS>) {
+  constructor(
+    protected nodeConfig: NodeConfig,
+    protected project: ISubqueryProject<IProjectNetworkConfig, DS>
+  ) {
     const projectPath = this.project.root;
     // find all paths to test files
     const testFiles = this.findAllTestFiles(path.join(projectPath, 'dist'));
@@ -55,16 +57,11 @@ export abstract class TestingService<A, SA, B, DS extends BaseDataSource> {
 
   abstract getTestRunner(): Promise<[close: () => Promise<void>, runner: TestRunner<A, SA, B, DS>]>; // TestRunner will be create with a new app instance
 
-  async indexBlock(
-    block: B,
-    handler: string,
-    indexerManager: IIndexerManager<B, DS>,
-    apiService?: IApi<A, SA, B[]>
-  ): Promise<void> {
+  async indexBlock(block: IBlock<B>, handler: string, indexerManager: IIndexerManager<B, DS>): Promise<void> {
     await indexerManager.indexBlock(block, this.getDsWithHandler(handler));
   }
 
-  async run() {
+  async run(): Promise<void> {
     if (Object.keys(this.tests).length !== 0) {
       for (const sandboxIndex in this.tests) {
         const tests = this.tests[sandboxIndex];
@@ -115,7 +112,11 @@ export abstract class TestingService<A, SA, B, DS extends BaseDataSource> {
         this.indexBlock.bind(this)
       );
 
-      failedTests > 0 ? this.totalFailedTests++ : this.totalPassedTests++;
+      if (failedTests > 0) {
+        this.totalFailedTests++;
+      } else {
+        this.totalPassedTests++;
+      }
 
       if (failedTestSummary) {
         this.failedTestsSummary.push(failedTestSummary);
@@ -171,5 +172,9 @@ export abstract class TestingService<A, SA, B, DS extends BaseDataSource> {
     logger.info(chalk.bold.white(`Total tests: ${this.totalTests}`));
     logger.info(chalk.bold.green(`Passing tests: ${this.totalPassedTests}`));
     logger.info(chalk.bold.red(`Failing tests: ${this.totalFailedTests}`));
+
+    if (this.totalFailedTests > 0) {
+      process.exit(1);
+    }
   }
 }

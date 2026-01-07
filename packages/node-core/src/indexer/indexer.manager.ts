@@ -1,17 +1,20 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'assert';
-import {BaseCustomDataSource, BaseDataSource} from '@subql/types-core';
+import {BaseCustomDataSource, BaseDataSource, IProjectNetworkConfig} from '@subql/types-core';
 import {IApi} from '../api.service';
+import {IBlockchainService} from '../blockchain.service';
 import {NodeConfig} from '../configure';
 import {getLogger} from '../logger';
+import {exitWithError, monitorWrite} from '../process';
 import {profilerWrap} from '../profiler';
+import {handledStringify} from './../utils';
 import {ProcessBlockResponse} from './blockDispatcher';
-import {BaseDsProcessorService} from './ds-processor.service';
+import {asSecondLayerHandlerProcessor_1_0_0, DsProcessorService} from './ds-processor.service';
 import {DynamicDsService} from './dynamic-ds.service';
 import {IndexerSandbox} from './sandbox';
-import {IIndexerManager} from './types';
+import {Header, IBlock, IIndexerManager, ISubqueryProject} from './types';
 import {IUnfinalizedBlocksService} from './unfinalizedBlocks.service';
 
 const logger = getLogger('indexer');
@@ -21,8 +24,10 @@ export type FilterTypeMap<DS extends BaseDataSource = BaseDataSource> = Record<
   string,
   (data: any, filter: any, ds: DS) => boolean
 >;
-export type ProcessorTypeMap<FM extends FilterTypeMap> = {[K in keyof FM]: (data: any) => boolean};
-export type HandlerInputTypeMap<FM extends FilterTypeMap> = {[K in keyof FM]: any};
+export type ProcessorTypeMap<DS extends BaseDataSource, FM extends FilterTypeMap<DS>> = {
+  [K in keyof FM]: (data: any) => boolean;
+};
+export type HandlerInputTypeMap<DS extends BaseDataSource, FM extends FilterTypeMap<DS>> = {[K in keyof FM]: any};
 
 export interface CustomHandler<K extends string = string, F = Record<string, unknown>> {
   handler: string;
@@ -31,26 +36,18 @@ export interface CustomHandler<K extends string = string, F = Record<string, unk
 }
 
 export abstract class BaseIndexerManager<
-  SA, // Api Type
-  A, // SafeApi Type
+  A, // Api Type
+  SA, // SafeApi Type
   B, // Block Type
-  API extends IApi<A, SA, B[]>,
+  API extends IApi<A, SA, IBlock<B>[]>,
   DS extends BaseDataSource,
   CDS extends DS & BaseCustomDataSource, // Custom datasource
-  FilterMap extends FilterTypeMap,
-  ProcessorMap extends ProcessorTypeMap<FilterMap>,
-  HandlerInputMap extends HandlerInputTypeMap<FilterMap>
+  FilterMap extends FilterTypeMap<DS>,
+  ProcessorMap extends ProcessorTypeMap<DS, FilterMap>,
+  HandlerInputMap extends HandlerInputTypeMap<DS, FilterMap>,
 > implements IIndexerManager<B, DS>
 {
-  abstract indexBlock(block: B, datasources: DS[], ...args: any[]): Promise<ProcessBlockResponse>;
-  abstract getBlockHeight(block: B): number;
-  abstract getBlockHash(block: B): string;
-
-  protected abstract isRuntimeDs(ds: DS): ds is DS;
-  protected abstract isCustomDs(ds: DS): ds is CDS;
-
-  // Uses asSecondLayerHandlerProcessor_1_0_0 in substrate to transfrom from v0.0.0 -> v1.0.0
-  protected abstract updateCustomProcessor: (processor: any) => any;
+  abstract indexBlock(block: IBlock<B>, datasources: DS[]): Promise<ProcessBlockResponse>;
 
   protected abstract indexBlockData(
     block: B,
@@ -64,38 +61,48 @@ export abstract class BaseIndexerManager<
   constructor(
     protected readonly apiService: API,
     protected readonly nodeConfig: NodeConfig,
-    private sandboxService: {getDsProcessor: (ds: DS, api: SA) => IndexerSandbox},
-    private dsProcessorService: BaseDsProcessorService<DS, CDS>,
+    protected sandboxService: {getDsProcessor: (ds: DS, api: SA, unsafeApi: A) => IndexerSandbox},
+    private dsProcessorService: DsProcessorService<DS, CDS>,
     private dynamicDsService: DynamicDsService<DS>,
     private unfinalizedBlocksService: IUnfinalizedBlocksService<B>,
     private filterMap: FilterMap,
-    private processorMap: ProcessorMap
+    private processorMap: ProcessorMap,
+    protected blockchainService: IBlockchainService<DS, CDS, ISubqueryProject<IProjectNetworkConfig, DS>, SA, B, B>
   ) {
     logger.info('indexer manager start');
   }
 
+  /**
+   * This function can be overwritten to provide extra values to the sandbox
+   * E.g Cosmos injecting the registry
+   * */
+  protected getDsProcessor(ds: DS, safeApi: SA): IndexerSandbox {
+    return this.sandboxService.getDsProcessor(ds, safeApi, this.apiService.unsafeApi);
+  }
+
   protected async internalIndexBlock(
-    block: B,
+    block: IBlock<B>,
     dataSources: DS[],
     getApi: () => Promise<SA>
   ): Promise<ProcessBlockResponse> {
     let dynamicDsCreated = false;
-    const blockHeight = this.getBlockHeight(block);
+    const blockHeight = block.getHeader().blockHeight;
+    monitorWrite(`- BlockHash: ${block.getHeader().blockHash}`);
 
     const filteredDataSources = this.filterDataSources(blockHeight, dataSources);
 
     this.assertDataSources(filteredDataSources, blockHeight);
 
     let apiAt: SA;
-    const reindexBlockHeight = (await this.processUnfinalizedBlocks(block)) ?? null;
+    const reindexBlockHeader = (await this.processUnfinalizedBlocks(block)) ?? null;
 
     // Only index block if we're not going to reindex
-    if (!reindexBlockHeight) {
-      await this.indexBlockData(block, filteredDataSources, async (ds: DS) => {
+    if (!reindexBlockHeader) {
+      await this.indexBlockData(block.block, filteredDataSources, async (ds: DS) => {
         // Injected runtimeVersion from fetch service might be outdated
-        apiAt = apiAt ?? (await getApi());
+        apiAt ??= await getApi();
 
-        const vm = this.sandboxService.getDsProcessor(ds, apiAt);
+        const vm = this.getDsProcessor(ds, apiAt);
 
         // Inject function to create ds into vm
         vm.freeze(async (templateName: string, args?: Record<string, unknown>) => {
@@ -115,12 +122,11 @@ export abstract class BaseIndexerManager<
 
     return {
       dynamicDsCreated,
-      blockHash: this.getBlockHash(block),
-      reindexBlockHeight,
+      reindexBlockHeader,
     };
   }
 
-  protected async processUnfinalizedBlocks(block: B): Promise<number | undefined> {
+  protected async processUnfinalizedBlocks(block: IBlock<B>): Promise<Header | undefined> {
     if (this.nodeConfig.unfinalizedBlocks) {
       return this.unfinalizedBlocksService.processUnfinalizedBlocks(block);
     }
@@ -138,7 +144,7 @@ export abstract class BaseIndexerManager<
 
     // perform filter for custom ds
     filteredDs = filteredDs.filter((ds) => {
-      if (this.isCustomDs(ds)) {
+      if (this.blockchainService.isCustomDs(ds)) {
         return this.dsProcessorService.getDsProcessor(ds).dsFilterProcessor(ds, this.apiService.unsafeApi);
       } else {
         return true;
@@ -150,16 +156,16 @@ export abstract class BaseIndexerManager<
 
   private assertDataSources(ds: DS[], blockHeight: number) {
     if (!ds.length) {
-      logger.error(
+      exitWithError(
         `Issue detected with data sources: \n
-        Either all data sources have a 'startBlock' greater than the current indexed block height (${blockHeight}), 
+        Either all data sources have a 'startBlock' greater than the current indexed block height (${blockHeight}),
         or they have an 'endBlock' less than the current block. \n
         Solution options: \n
-        1. Adjust 'startBlock' in project.yaml to be less than or equal to ${blockHeight}, 
+        1. Adjust 'startBlock' in project.yaml to be less than or equal to ${blockHeight},
            and 'endBlock' to be greater than or equal to ${blockHeight}. \n
-        2. Delete your database and start again with the currently specified 'startBlock' and 'endBlock'.`
+        2. Delete your database and start again with the currently specified 'startBlock' and 'endBlock'.`,
+        logger
       );
-      process.exit(1);
     }
   }
 
@@ -169,38 +175,48 @@ export abstract class BaseIndexerManager<
     ds: DS,
     getVM: (ds: DS) => Promise<IndexerSandbox>
   ): Promise<void> {
-    let vm: IndexerSandbox;
     assert(this.filterMap[kind], `Unsupported handler kind: ${kind.toString()}`);
 
-    if (this.isRuntimeDs(ds)) {
+    if (this.blockchainService.isRuntimeDs(ds)) {
       const handlers = ds.mapping.handlers.filter(
         (h) => h.kind === kind && this.filterMap[kind](data as any, h.filter, ds)
       );
 
-      for (const handler of handlers) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        vm = vm! ?? (await getVM(ds));
-
-        const parsedData = await this.prepareFilteredData(kind, data, ds);
-
-        this.nodeConfig.profiler
-          ? await profilerWrap(
-              vm.securedExec.bind(vm),
-              'handlerPerformance',
-              handler.handler
-            )(handler.handler, [parsedData])
-          : await vm.securedExec(handler.handler, [parsedData]);
+      if (!handlers.length) {
+        return;
       }
-    } else if (this.isCustomDs(ds)) {
+
+      const parsedData = await this.prepareFilteredData(kind, data, ds);
+      const vm = await getVM(ds);
+      for (const handler of handlers) {
+        monitorWrite(
+          () => `- Handler: ${handler.handler}, args:${handledStringify(data, this.nodeConfig.monitorObjectMaxDepth)}`
+        );
+        if (this.nodeConfig.profiler) {
+          await profilerWrap(
+            vm.securedExec.bind(vm),
+            'handlerPerformance',
+            handler.handler
+          )(handler.handler, [parsedData]);
+        } else {
+          await vm.securedExec(handler.handler, [parsedData]);
+        }
+      }
+    } else if (this.blockchainService.isCustomDs(ds)) {
       const handlers = this.filterCustomDsHandlers<K>(ds, data, this.processorMap[kind], (data, baseFilter) => {
         if (!baseFilter.length) return true;
-
         return baseFilter.find((filter) => this.filterMap[kind](data, filter, ds));
       });
 
+      if (!handlers.length) {
+        return;
+      }
+
+      const vm = await getVM(ds);
       for (const handler of handlers) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        vm = vm! ?? (await getVM(ds));
+        monitorWrite(
+          () => `- Handler: ${handler.handler}, args:${handledStringify(data, this.nodeConfig.monitorObjectMaxDepth)}`
+        );
         await this.transformAndExecuteCustomDs(ds, vm, handler, data);
       }
     }
@@ -223,7 +239,7 @@ export abstract class BaseIndexerManager<
         return false;
       })
       .filter((handler) => {
-        const processor = this.updateCustomProcessor(plugin.handlerProcessors[handler.kind]);
+        const processor = asSecondLayerHandlerProcessor_1_0_0(plugin.handlerProcessors[handler.kind]);
 
         try {
           return processor.filterProcessor({
@@ -247,7 +263,7 @@ export abstract class BaseIndexerManager<
     const plugin = this.dsProcessorService.getDsProcessor(ds);
     const assets = await this.dsProcessorService.getAssets(ds);
 
-    const processor = this.updateCustomProcessor(plugin.handlerProcessors[handler.kind]);
+    const processor = asSecondLayerHandlerProcessor_1_0_0(plugin.handlerProcessors[handler.kind]);
 
     const transformedData = await processor
       .transformer({

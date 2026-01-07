@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import fs from 'fs';
@@ -21,14 +21,14 @@ export class ReaderFactory {
 
     const ipfsMatch = location.match(IPFS_REGEX);
     if (ipfsMatch) {
-      return new IPFSReader(location.replace('ipfs://', ''), options.ipfs);
+      return new IPFSReader(location.replace('ipfs://', ''), options?.ipfs);
     }
 
     //local mode
     if (fs.existsSync(location)) {
       const project = getProjectRootAndManifest(location);
       if (project.manifests.length > 1) {
-        throw new Error(`Mulitple manifests found, expected only one`);
+        throw new Error(`Multiple manifests found, expected only one`);
       }
       return new LocalReader(project.root, path.join(project.root, project.manifests[0]));
     }

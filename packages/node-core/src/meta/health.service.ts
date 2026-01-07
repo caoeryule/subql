@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {Injectable} from '@nestjs/common';
@@ -22,7 +22,10 @@ export class HealthService {
   private healthTimeout: number;
   private indexerHealthy?: boolean;
 
-  constructor(protected nodeConfig: NodeConfig, private storeService: StoreService) {
+  constructor(
+    protected nodeConfig: NodeConfig,
+    private storeService: StoreService
+  ) {
     this.healthTimeout = Math.max(DEFAULT_TIMEOUT, this.nodeConfig.timeout * 1000);
     this.blockTime = Math.max(DEFAULT_BLOCK_TIME, this.nodeConfig.blockTime);
   }
@@ -39,7 +42,7 @@ export class HealthService {
     }
 
     if (healthy !== this.indexerHealthy) {
-      await this.storeService.storeCache.metadata.model.upsert({key: 'indexerHealthy', value: healthy});
+      await this.storeService.modelProvider.metadata.model.upsert({key: 'indexerHealthy', value: healthy});
       this.indexerHealthy = healthy;
     }
   }

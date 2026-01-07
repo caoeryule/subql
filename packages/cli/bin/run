@@ -3,26 +3,26 @@
 const pjson = require('../package.json');
 const updateNotifier = require('update-notifier');
 const chalk = require('chalk');
-const boxen = require('boxen');
 const semver = require('semver');
 
 const notifier = updateNotifier({pkg: pjson, updateCheckInterval: 0});
+
 if (notifier.update) {
   const {current, latest, name} = notifier.update;
 
   if (semver.lt(current, latest)) {
-    const message =
-      `Update available ${chalk.dim(`${current}`)}  →  ${chalk.green(`${latest}`)}` +
-      `\nRun ${chalk.cyan(`npm i -g ${name}`)} to update`;
-    const boxenOptions = {
-      padding: 1,
-      margin: 1,
-      align: 'center',
-      borderColor: 'yellow',
-      borderStyle: 'round',
-    };
-    console.log(boxen(message, boxenOptions));
+    const message = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Update available ${chalk.dim(current)} → ${chalk.green(latest)}
+ Run ${chalk.cyan(`npm i -g ${name}`)} to update
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    `;
+    console.log(message);
   }
 }
-const oclif = require('@oclif/core')
-oclif.run().then(oclif.flush).catch(oclif.Errors.handle)
+
+// eslint-disable-next-line unicorn/prefer-top-level-await
+(async () => {
+  const oclif = await import('@oclif/core');
+  await oclif.execute({development: false, dir: __dirname});
+})();

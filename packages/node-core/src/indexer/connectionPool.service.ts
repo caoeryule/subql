@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'assert';
@@ -10,7 +10,7 @@ import {ApiConnectionError, ApiErrorType} from '../api.connection.error';
 import {IApiConnectionSpecific} from '../api.service';
 import {NodeConfig} from '../configure';
 import {getLogger} from '../logger';
-import {delay, retryWithBackoff} from '../utils';
+import {backoffRetry, delay} from '../utils';
 import {ConnectionPoolStateManager} from './connectionPoolState.manager';
 
 const logger = getLogger('connection-pool');
@@ -34,13 +34,16 @@ type ResultCacheEntry<T> = {
 export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, any>> implements OnApplicationShutdown {
   private allApi: Record<string, T> = {};
   private cachedEndpoint: string | undefined;
-  private reconnectingEndpoints: Record<string, NodeJS.Timeout | undefined> = {};
+  private reconnectingEndpoints: Record<string, Promise<void> | undefined> = {};
   private resultCache: Array<ResultCacheEntry<number | ApiConnectionError['errorType']>> = [];
   private lastCacheFlushTime: number = Date.now();
   private cacheSizeThreshold = 10;
   private cacheFlushInterval = 60 * 100;
 
-  constructor(private nodeConfig: NodeConfig, private poolStateManager: ConnectionPoolStateManager<T>) {
+  constructor(
+    private nodeConfig: NodeConfig,
+    private poolStateManager: ConnectionPoolStateManager<T>
+  ) {
     this.cacheSizeThreshold = this.nodeConfig.batchSize;
   }
 
@@ -50,7 +53,7 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
 
   async addToConnections(api: T, endpoint: string): Promise<void> {
     this.allApi[endpoint] = api;
-    await this.poolStateManager.addToConnections(endpoint, endpoint === this.nodeConfig.primaryNetworkEndpoint);
+    await this.poolStateManager.addToConnections(endpoint, endpoint === this.nodeConfig.primaryNetworkEndpoint?.[0]);
     if (api !== null) {
       await this.updateNextConnectedApiIndex();
     }
@@ -101,9 +104,8 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
             try {
               // Check if the endpoint is rate-limited
               if (await this.poolStateManager.getFieldValue(endpoint, 'rateLimited')) {
-                logger.info('throtling on ratelimited endpoint');
-                const backoffDelay = await this.poolStateManager.getFieldValue(endpoint, 'backoffDelay');
-                await delay(backoffDelay / 1000);
+                logger.info(`throtling on ratelimited endpoint 10s`);
+                await delay(10);
               }
 
               const start = Date.now();
@@ -112,8 +114,8 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
               await this.handleApiSuccess(endpoint, end - start);
               await this.poolStateManager.setFieldValue(endpoint, 'lastRequestTime', end); // Update the last request time
               return result;
-            } catch (error) {
-              await this.handleApiError(endpoint, target.handleError(error as Error));
+            } catch (error: any) {
+              await this.handleApiError(endpoint, target.handleError(error));
               throw error;
             }
           };
@@ -133,30 +135,24 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
   async handleApiDisconnects(endpoint: string): Promise<void> {
     logger.warn(`disconnected from ${endpoint}`);
 
-    const maxAttempts = 5;
-
     const tryReconnect = async () => {
-      logger.info(`Attempting to reconnect to ${endpoint}`);
+      try {
+        logger.info(`Attempting to reconnect to ${endpoint}`);
 
-      await this.allApi[endpoint].apiConnect();
-      await this.poolStateManager.setFieldValue(endpoint, 'connected', true);
-      this.reconnectingEndpoints[endpoint] = undefined;
-      logger.info(`Reconnected to ${endpoint} successfully`);
+        await this.allApi[endpoint].apiConnect();
+        await this.poolStateManager.setFieldValue(endpoint, 'connected', true);
+        this.reconnectingEndpoints[endpoint] = undefined;
+        logger.info(`Reconnected to ${endpoint} successfully`);
+      } catch (e) {
+        logger.error(`Reconnection failed: ${e}`);
+        throw e;
+      }
     };
 
-    this.reconnectingEndpoints[endpoint] = retryWithBackoff(
-      tryReconnect,
-      (error) => {
-        logger.error(`Reconnection failed: ${error}`);
-      },
-      // eslint-disable-next-line @typescript-eslint/no-misused-promises
-      async () => {
-        logger.error(`Reached max reconnection attempts. Removing connection ${endpoint} from pool.`);
-        await this.poolStateManager.removeFromConnections(endpoint);
-      },
-      0,
-      maxAttempts
-    );
+    this.reconnectingEndpoints[endpoint] = backoffRetry(tryReconnect, 5).catch(async (e: any) => {
+      logger.error(`Reached max reconnection attempts. Removing connection ${endpoint} from pool.`);
+      await this.poolStateManager.removeFromConnections(endpoint);
+    });
 
     await this.handleConnectionStateChange();
     logger.info(`reconnected to ${endpoint}!`);
@@ -205,10 +201,10 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
     await this.updateNextConnectedApiIndex();
     const disconnectedEndpoints = await this.poolStateManager.getDisconnectedEndpoints();
     disconnectedEndpoints.map((endpoint) => {
-      if (this.reconnectingEndpoints[endpoint]) {
+      if (this.reconnectingEndpoints[endpoint] !== undefined) {
         return;
       }
-      this.handleApiDisconnects(endpoint);
+      void this.handleApiDisconnects(endpoint);
     });
   }
 
@@ -252,5 +248,12 @@ export class ConnectionPoolService<T extends IApiConnectionSpecific<any, any, an
     this.resultCache = [];
     this.lastCacheFlushTime = Date.now();
     await this.handleConnectionStateChange();
+  }
+
+  async updateChainTypes(newChainTypes: unknown): Promise<void> {
+    for (const endpoint in this.allApi) {
+      await this.allApi[endpoint].updateChainTypes?.(newChainTypes);
+    }
+    logger.info(`Network chain types updated!`);
   }
 }

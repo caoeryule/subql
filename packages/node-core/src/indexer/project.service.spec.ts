@@ -1,14 +1,22 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import {NodeConfig} from '../configure';
-import {BlockHeightMap} from '../utils/blockHeightMap';
-import {BaseDsProcessorService} from './ds-processor.service';
-import {DynamicDsService} from './dynamic-ds.service';
-import {BaseProjectService} from './project.service';
-import {ISubqueryProject} from './types';
+import {EventEmitter2} from '@nestjs/event-emitter';
+import {buildSchemaFromString} from '@subql/utils';
+import {IBlockchainService} from '../blockchain.service';
+import {NodeConfig, ProjectUpgradeService} from '../configure';
+import {DsProcessorService} from './ds-processor.service';
+import {DatasourceParams, DynamicDsService} from './dynamic-ds.service';
+import {ProjectService} from './project.service';
+import {Header, IBlock, ISubqueryProject} from './types';
+import {
+  METADATA_LAST_FINALIZED_PROCESSED_KEY,
+  METADATA_UNFINALIZED_BLOCKS_KEY,
+  UnfinalizedBlocksService,
+} from './unfinalizedBlocks.service';
+import {IBaseIndexerWorker} from './worker';
 
-class TestProjectService extends BaseProjectService<any, any> {
+class TestProjectService extends ProjectService<any, any> {
   packageVersion = '1.0.0';
 
   async getBlockTimestamp(height: number): Promise<Date> {
@@ -18,6 +26,101 @@ class TestProjectService extends BaseProjectService<any, any> {
   onProjectChange(project: any): void {
     return;
   }
+
+  protected async getExistingProjectSchema(): Promise<string | undefined> {
+    return Promise.resolve('test');
+  }
+}
+
+class TestBlockchainService implements IBlockchainService {
+  packageVersion = '0.0.0';
+  blockHandlerKind = '';
+
+  // eslint-disable-next-line @typescript-eslint/promise-function-async
+  fetchBlocks(blockNums: number[]): Promise<IBlock<any>[]> {
+    throw new Error('Method fetchBlocks not implemented.');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/promise-function-async
+  fetchBlockWorker(
+    worker: IBaseIndexerWorker,
+    blockNum: number,
+    context: {workers: IBaseIndexerWorker[]}
+  ): Promise<Header> {
+    throw new Error('Method not implemented.');
+  }
+
+  onProjectChange(project: ISubqueryProject): Promise<void> | void {
+    // throw new Error('Method onProjectChange not implemented.');
+  }
+  // eslint-disable-next-line @typescript-eslint/promise-function-async
+  getBlockTimestamp(height: number): Promise<Date> {
+    return Promise.resolve(new Date());
+  }
+  getBlockSize(block: IBlock): number {
+    return 0;
+  }
+  // eslint-disable-next-line @typescript-eslint/promise-function-async
+  getBestHeight(): Promise<number> {
+    throw new Error('Method getBestHeight not implemented.');
+  }
+  // eslint-disable-next-line @typescript-eslint/promise-function-async
+  getChainInterval(): Promise<number> {
+    throw new Error('Method getChainInterval not implemented.');
+  }
+  // eslint-disable-next-line @typescript-eslint/promise-function-async
+  updateDynamicDs(params: DatasourceParams, template: any): Promise<void> {
+    throw new Error('Method updateDynamicDs not implemented.');
+  }
+  isCustomDs(x: any): x is any {
+    return false;
+  }
+  isRuntimeDs(x: any): x is any {
+    return false;
+  }
+  // eslint-disable-next-line @typescript-eslint/promise-function-async
+  getSafeApi(block: any): Promise<any> {
+    throw new Error('Method not implemented.');
+  }
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getFinalizedHeader(): Promise<Header> {
+    return {
+      blockHash: 'asdf',
+      blockHeight: 1000,
+      parentHash: 'efgh',
+      timestamp: new Date(),
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getHeaderForHash(hash: string): Promise<Header> {
+    const num = parseInt(hash.slice(1), 10);
+    return {
+      blockHeight: num,
+      blockHash: hash,
+      parentHash: `b${num - 1}`,
+      timestamp: new Date(),
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getHeaderForHeight(height: number): Promise<Header> {
+    return {
+      blockHeight: height,
+      blockHash: `b${height}`,
+      parentHash: `b${height - 1}`,
+      timestamp: new Date(),
+    };
+  }
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getRequiredHeaderForHeight(height: number): Promise<Header & {timestamp: Date}> {
+    return {
+      blockHeight: height,
+      blockHash: `b${height}`,
+      parentHash: `b${height - 1}`,
+      timestamp: new Date(),
+    };
+  }
 }
 
 describe('BaseProjectService', () => {
@@ -25,7 +128,7 @@ describe('BaseProjectService', () => {
 
   beforeEach(() => {
     service = new TestProjectService(
-      null as unknown as BaseDsProcessorService,
+      null as unknown as DsProcessorService,
       null as unknown as any,
       null as unknown as any,
       null as unknown as any,
@@ -36,6 +139,8 @@ describe('BaseProjectService', () => {
       {unsafe: false} as unknown as NodeConfig,
       {getDynamicDatasources: jest.fn()} as unknown as DynamicDsService<any>,
       null as unknown as any,
+      null as unknown as any,
+      new TestBlockchainService(),
       null as unknown as any
     );
   });
@@ -224,6 +329,162 @@ describe('BaseProjectService', () => {
           [7880532, [{startBlock: 7408909}]],
         ])
       );
+    });
+  });
+
+  // Tests initializing the project service to ensure that things are initialized in the correct order
+  // NOTE: this is not currently covering all scenarios
+  describe('initializing services', () => {
+    beforeAll(() => {
+      process.env.TZ = 'utc';
+    });
+
+    const defaultProjects = [
+      {
+        id: '1',
+        network: {
+          chainId: '1',
+        },
+        dataSources: [{startBlock: 1}],
+        schema: buildSchemaFromString(`type TestEntity @entity {
+  id: ID!
+  fieldOne: String
+  fieldTwo: Int
+  #  fieldThree: BigInt!
+}`),
+        applyCronTimestamps: jest.fn(),
+      } as unknown as ISubqueryProject<any>,
+    ];
+
+    const setupProject = async (
+      startBlock = 1,
+      unfinalizedBlocks: Header[] = [],
+      lastFinalizedHeight?: number,
+      projects: ISubqueryProject<any>[] = defaultProjects
+    ) => {
+      const project = projects[0];
+
+      const projectUpgradeService = await ProjectUpgradeService.create(project, (id: string) =>
+        Promise.resolve(projects[parseInt(id, 10)])
+      );
+
+      const nodeConfig = {unsafe: false} as unknown as NodeConfig;
+
+      const storeService = {
+        init: jest.fn(),
+        initCoreTables: jest.fn(),
+        historical: true,
+        modelProvider: {
+          metadata: {
+            findMany: jest.fn(async () => Promise.resolve({})),
+            find: jest.fn(async (key: string): Promise<any> => {
+              let result: any;
+              switch (key) {
+                case METADATA_LAST_FINALIZED_PROCESSED_KEY:
+                  result = lastFinalizedHeight;
+                  break;
+                case METADATA_UNFINALIZED_BLOCKS_KEY:
+                  result = JSON.stringify(unfinalizedBlocks);
+                  break;
+                case 'lastProcessedHeight':
+                  result = startBlock - 1;
+                  break;
+                case 'deployments':
+                  result = JSON.stringify({1: '1'});
+                  break;
+                default:
+                  result = undefined;
+                  break;
+              }
+              return Promise.resolve(result);
+            }),
+            set: jest.fn(),
+            flush: jest.fn(),
+          } as any,
+          resetCache: jest.fn(),
+          flushCache: jest.fn(),
+          _flushCache: jest.fn(),
+        },
+        rewind: jest.fn(),
+      } as unknown as any;
+
+      const blockchainService = new TestBlockchainService();
+
+      service = new TestProjectService(
+        {
+          validateProjectCustomDatasources: jest.fn(),
+        } as unknown as DsProcessorService, // dsProcessorService
+        {networkMeta: {}} as unknown as any, //apiService
+        null as unknown as any, // poiService
+        null as unknown as any, // poiSyncService
+        {
+          transaction: jest.fn(() => ({
+            rollback: jest.fn(),
+            commit: jest.fn(),
+          })),
+        } as unknown as any, // sequelize
+        project, // project
+        projectUpgradeService, // projectUpgradeService
+        storeService, // storeService
+        nodeConfig,
+        {
+          init: jest.fn(),
+          getDynamicDatasources: jest.fn(() => []),
+          resetDynamicDatasource: jest.fn(),
+        } as unknown as DynamicDsService<any>, // dynamicDsService
+        new EventEmitter2(), // eventEmitter
+        new UnfinalizedBlocksService(nodeConfig, storeService.modelProvider, blockchainService), // unfinalizedBlocksService
+        blockchainService,
+        {init: jest.fn()} as any // MultiChainRewindService
+      );
+    };
+
+    it('succeeds with no rewinds', async () => {
+      await setupProject();
+
+      await service.init();
+
+      await expect(service.init()).resolves.not.toThrow();
+    });
+
+    it('succeeds with a project upgrade rewind', async () => {
+      const projects = [
+        {
+          ...defaultProjects[0],
+          id: '0',
+          parent: {block: 20, untilBlock: 20, reference: '1'},
+          schema: buildSchemaFromString(`type TestEntity @entity {
+  id: ID!
+  fieldOne: String
+  fieldTwo: Int
+  fieldThree: BigInt!
+}`),
+        },
+        ...defaultProjects,
+      ];
+      await setupProject(100, [], 100, projects);
+
+      const reindexSpy = jest.spyOn(service, 'reindex');
+      await service.init();
+      // await expect(service.init()).resolves.not.toThrow();
+      expect(reindexSpy).toHaveReturnedTimes(1);
+    });
+
+    it('succeeds with an unfinalized blocks rewind', async () => {
+      await setupProject(
+        95,
+        [
+          {blockHeight: 100, blockHash: 'a100', parentHash: 'a99', timestamp: new Date()},
+          {blockHeight: 99, blockHash: 'a99', parentHash: 'a98', timestamp: new Date()},
+        ],
+        90
+      );
+
+      const reindexSpy = jest.spyOn(service, 'reindex');
+
+      await expect(service.init()).resolves.not.toThrow();
+
+      expect(reindexSpy).toHaveReturnedTimes(1);
     });
   });
 });

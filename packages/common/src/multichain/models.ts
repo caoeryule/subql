@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {MultichainProjectManifest, QuerySpec} from '@subql/types-core';
@@ -8,10 +8,10 @@ import {RunnerQueryBaseModel} from '../project';
 
 export class MultichainProjectManifestModel implements MultichainProjectManifest {
   @Equals('1.0.0')
-  specVersion: string;
+  specVersion!: string;
   @IsString({each: true})
-  projects: string[];
+  projects!: string[];
   @IsObject()
   @Type(() => RunnerQueryBaseModel)
-  query: QuerySpec;
+  query!: QuerySpec;
 }

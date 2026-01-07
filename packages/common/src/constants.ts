@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 // APP API PORT
@@ -23,10 +23,11 @@ export enum NETWORK_FAMILY {
   cosmos = 'Cosmos',
   algorand = 'Algorand',
   ethereum = 'Ethereum',
-  flare = 'Flare',
   near = 'Near',
   stellar = 'Stellar',
   concordium = 'Concordium',
+  starknet = 'Starknet',
+  solana = 'Solana',
 }
 
 export const runnerMapping = {
@@ -35,17 +36,12 @@ export const runnerMapping = {
   '@subql/node-cosmos': NETWORK_FAMILY.cosmos,
   '@subql/node-algorand': NETWORK_FAMILY.algorand,
   '@subql/node-ethereum': NETWORK_FAMILY.ethereum,
-  '@subql/node-flare': NETWORK_FAMILY.flare,
   '@subql/node-near': NETWORK_FAMILY.near,
   '@subql/node-stellar': NETWORK_FAMILY.stellar,
   '@subql/node-concordium': NETWORK_FAMILY.concordium,
+  '@subql/node-starknet': NETWORK_FAMILY.starknet,
+  '@subql/node-solana': NETWORK_FAMILY.solana,
 };
-
-// DATABASE TYPE
-export enum SUPPORT_DB {
-  cockRoach = 'CockroachDB',
-  postgres = 'PostgreSQL',
-}
 
 // DATABASE ERROR REGEX
 export const CONNECTION_SSL_ERROR_REGEX = 'not support SSL';

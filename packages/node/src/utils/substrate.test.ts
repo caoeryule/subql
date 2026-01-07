@@ -1,17 +1,21 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import { ApiPromise, WsProvider } from '@polkadot/api';
-import Cron from 'cron-converter';
+import { getLogger } from '@subql/node-core';
+import { stringToArray } from 'cron-converter';
 import {
   fetchBlocksArray,
   fetchBlocksBatches,
   filterExtrinsic,
+  getBlockByHeight,
+  getHeaderForHash,
+  getTimestamp,
 } from './substrate';
 
 const ENDPOINT_POLKADOT = 'wss://rpc.polkadot.io';
 const ENDPOINT_KARURA = 'wss://karura-rpc-0.aca-api.network';
-
+const ENDPOINT_SHIDEN = 'wss://rpc.shiden.astar.network';
 jest.setTimeout(100000);
 
 describe('substrate utils', () => {
@@ -25,10 +29,9 @@ describe('substrate utils', () => {
 
   it('invalid timestamp throws error on cron creation', () => {
     const cronString = 'invalid cron';
-    const cron = new Cron();
     expect(() => {
       try {
-        cron.fromString(cronString);
+        stringToArray(cronString);
       } catch (e) {
         throw new Error(`invalid cron expression: ${cronString}`);
       }
@@ -48,7 +51,9 @@ describe('substrate utils', () => {
   });
 
   it('filters a signed extrinsic', async () => {
-    const [block] = await fetchBlocksBatches(api, [16832854]);
+    const [iblock] = await fetchBlocksBatches(api, [16832854]);
+
+    const block = iblock.block;
 
     expect(
       filterExtrinsic(block.extrinsics[0], { isSigned: true }),
@@ -63,5 +68,51 @@ describe('substrate utils', () => {
     expect(
       filterExtrinsic(block.extrinsics[2], { isSigned: false }),
     ).toBeFalsy();
+  });
+
+  it('decode fail message', async () => {
+    const logger = getLogger('fetch');
+    const consoleSpy = jest.spyOn(logger, 'error');
+
+    const provider = new WsProvider(ENDPOINT_KARURA);
+    const api = await ApiPromise.create({ provider });
+
+    await expect(getBlockByHeight(api, 86614)).rejects.toThrow(
+      /Unable to decode|failed decoding|unknown type/,
+    );
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/Update the chain types/),
+    );
+    consoleSpy.mockRestore();
+    await api.disconnect();
+  });
+
+  it('decode normal message', async () => {
+    const provider = new WsProvider(ENDPOINT_KARURA);
+    const api = await ApiPromise.create({ provider });
+
+    expect(await getBlockByHeight(api, 50710)).toBeTruthy();
+    await api.disconnect();
+  });
+
+  it('return undefined if no timestamp set extrinsic', async () => {
+    const provider = new WsProvider(ENDPOINT_SHIDEN);
+    const api = await ApiPromise.create({ provider });
+    const block1 = await getBlockByHeight(api, 1);
+    expect(getTimestamp(block1)).toBeUndefined();
+    await api.disconnect();
+  });
+
+  it('return defined if no timestamp set extrinsic', async () => {
+    const provider = new WsProvider(ENDPOINT_SHIDEN);
+    const api = await ApiPromise.create({ provider });
+    const block1 = await getBlockByHeight(api, 999999);
+    const { timestamp } = await getHeaderForHash(
+      api,
+      block1.block.header.hash.toString(),
+    );
+    expect(timestamp).toBeDefined();
+    await api.disconnect();
   });
 });

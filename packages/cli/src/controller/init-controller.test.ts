@@ -1,12 +1,10 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import * as fs from 'fs';
 import path from 'path';
-import {promisify} from 'util';
 import {makeTempDir} from '@subql/common';
-import {copySync} from 'fs-extra';
-import rimraf from 'rimraf';
+import {rimraf} from 'rimraf';
 import git from 'simple-git';
 import {parseDocument, Document} from 'yaml';
 import {isProjectSpecV0_2_0, isProjectSpecV1_0_0, ProjectSpecBase} from '../types';
@@ -44,14 +42,10 @@ async function testYAML(projectPath: string, project: ProjectSpecBase): Promise<
   };
 }
 
-// async
-const fileExists = async (file: string): Promise<boolean> => {
-  return new Promise<boolean>((resolve, reject) => {
-    fs.access(file, fs.constants.F_OK, (err) => {
-      err ? reject(err) : resolve(true);
-    });
-  });
-};
+async function fileExists(file: string): Promise<boolean> {
+  await fs.promises.access(file, fs.constants.F_OK);
+  return true;
+}
 
 jest.setTimeout(30000);
 
@@ -103,7 +97,7 @@ describe('Cli can create project', () => {
     await git(tempPath).raw('sparse-checkout', 'set', `${projects[0].path}`);
     await git(tempPath).raw('pull', 'origin', 'd2868e9e46371f0ce45e52acae2ace6cb97296a0');
 
-    copySync(path.join(tempPath, `${projects[0].path}`), projectPath);
+    await fs.promises.cp(path.join(tempPath, `${projects[0].path}`), projectPath, {recursive: true});
     fs.rmSync(tempPath, {recursive: true, force: true});
 
     const output = await testYAML(path.join(localPath, projectSpec.name), projectSpec);
@@ -111,26 +105,22 @@ describe('Cli can create project', () => {
     expect(output.new).not.toEqual(output.old);
     expect(output.new.toString()).toContain('# The genesis hash of the network (hash of block 0)');
 
-    await promisify(rimraf)(localPath);
+    await rimraf(localPath);
   });
 
   it('prepare correctly applies project details', async () => {
     const tempPath = await makeTempDir();
     const projects = await fetchExampleProjects('polkadot', 'polkadot');
-    const projectPath = await cloneProjectTemplate(
-      tempPath,
-      projectSpec.name,
-      projects.find((p) => p.name === 'Polkadot-starter')
-    );
+    const project = projects.find((p) => p.name === 'Polkadot-starter')!;
+    const projectPath = await cloneProjectTemplate(tempPath, projectSpec.name, project);
     await prepare(projectPath, projectSpec);
-    const [endpoint, author, description] = await readDefaults(projectPath);
+    const {author, description} = await readDefaults(projectPath);
 
     //spec version is  not returned from readDefaults
     //expect(projectSpec.specVersion).toEqual(specVersion);
-    expect(projectSpec.endpoint).toEqual(endpoint);
     expect(projectSpec.author).toEqual(author);
     expect(projectSpec.description).toEqual(description);
-    await promisify(rimraf)(tempPath);
+    await rimraf(tempPath);
   });
 
   it('allow git from sub directory', async () => {

@@ -6,6 +6,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.0] - 2025-10-15
+### Changed
+- Minor improvements and fixes from upgrading to eslint 9 with stricter settings (#2929)
+
+## [3.14.2] - 2025-09-16
+### Changed
+- Update polkadot dependenices (#2915)
+
+## [3.14.1] - 2025-07-17
+### Changed
+- Workspace dependencies now match to patch versions rather than exact (#2855)
+
+## [3.14.0] - 2025-07-14
+### Changed
+- Update to `@polkadot/api@^16` (#2845)
+
+## [3.13.0] - 2025-07-01
+### Removed
+- Test files and artifacts from published package (#2838)
+
+## [3.12.2] - 2025-04-24
+### Changed
+- Update polkadot dependencies
+
+## [3.12.1] - 2025-02-26
+### Changed
+- Update types core
+
+## [3.12.0] - 2025-02-19
+### Changed
+- Update polkadot api to 15 (#2680)
+
+### Removed
+- Redundant internal type (#2677)
+
+## [3.11.5] - 2025-02-04
+### Changed
+- Update copyright header to 2025
+
+## [3.11.4] - 2024-11-25
+### Added
+- Update polkadot/api library to 14 version
+
+## [3.11.3] - 2024-10-23
+### Fixed
+- Bump version `@subql/types-core`
+
+## [3.11.2] - 2024-08-14
+### Added
+- Update polkadot/api library
+
+## [3.11.1] - 2024-08-12
+### Fixed
+- DS Processor types not being able to distinguish input and filter types (#2522)
+
+## [3.11.0] - 2024-08-05
+### Changed
+- Update dependencies (#2518)
+
+## [3.10.0] - 2024-08-01
+### Fixed
+- Fix timestamp can be undefined (#2514)
+
+### Changed
+- Bump version with `@subql/types-core`
+
+## [3.9.0] - 2024-07-09
+### Changed
+- Enable TS strict setting.
+
+### Removed
+- Deprecated types relating to datasource processors (#2475)
+
+## [3.8.0] - 2024-07-01
+### Changed
+- Bump version with `@subql/types-core`
+
+## [3.7.0] - 2024-06-21
+### Changed
+- Bump version with `@subql/types-core`
+
+## [3.6.1] - 2024-06-12
+### Changed
+- Update polkadot dependencies to 11.2.1 (#2440)
+
+## [3.6.0] - 2024-05-08
+### Changed
+- Update polkadot dependencies to v11
+
+## [3.5.0] - 2024-04-24
+### Changed
+- Use ds processor types from `@subql/types-core` (#2357)
+
+## [3.4.0] - 2024-03-28
+### Added
+- Add IBlock interface for block content of all networks, also support dictionary to be array type (#2257)
+
+## [3.3.1] - 2024-02-07
+### Changed
+- Update `@subql/types-core`
+
 ## [3.3.0] - 2023-10-31
 ### Changed
 - Import types-core global so there is no need to update tsconfig
@@ -213,7 +314,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - support block handler
 
-[Unreleased]: https://github.com/subquery/subql/compare/types/3.3.0...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/types/3.15.0...HEAD
+[3.15.0]: https://github.com/subquery/subql/compare/types/3.14.2...types/3.15.0
+[3.14.2]: https://github.com/subquery/subql/compare/types/3.14.1...types/3.14.2
+[3.14.1]: https://github.com/subquery/subql/compare/types/3.14.0...types/3.14.1
+[3.14.0]: https://github.com/subquery/subql/compare/types/3.13.0...types/3.14.0
+[3.13.0]: https://github.com/subquery/subql/compare/types/3.12.2...types/3.13.0
+[3.12.2]: https://github.com/subquery/subql/compare/types/3.12.1...types/3.12.2
+[3.12.1]: https://github.com/subquery/subql/compare/types/3.12.0...types/3.12.1
+[3.12.0]: https://github.com/subquery/subql/compare/types/3.11.5...types/3.12.0
+[3.11.5]: https://github.com/subquery/subql/compare/types/3.11.4...types/3.11.5
+[3.11.4]: https://github.com/subquery/subql/compare/types/3.11.3...types/3.11.4
+[3.11.3]: https://github.com/subquery/subql/compare/types/3.11.2...types/3.11.3
+[3.11.2]: https://github.com/subquery/subql/compare/types/3.11.1...types/3.11.2
+[3.11.1]: https://github.com/subquery/subql/compare/types/3.11.0...types/3.11.1
+[3.11.0]: https://github.com/subquery/subql/compare/types/3.10.0...types/3.11.0
+[3.10.0]: https://github.com/subquery/subql/compare/types/3.9.0...types/3.10.0
+[3.9.0]: https://github.com/subquery/subql/compare/types/3.8.0...types/3.9.0
+[3.8.0]: https://github.com/subquery/subql/compare/types/3.7.0...types/3.8.0
+[3.7.0]: https://github.com/subquery/subql/compare/types/3.6.1...types/3.7.0
+[3.6.1]: https://github.com/subquery/subql/compare/types/3.6.0...types/3.6.1
+[3.6.0]: https://github.com/subquery/subql/compare/types/3.5.0...types/3.6.0
+[3.5.0]: https://github.com/subquery/subql/compare/types/3.4.0...types/3.5.0
+[3.4.0]: https://github.com/subquery/subql/compare/types/3.3.1...types/3.4.0
+[3.3.1]: https://github.com/subquery/subql/compare/types/3.3.0...types/3.3.1
 [3.3.0]: https://github.com/subquery/subql/compare/types/3.2.0...types/3.3.0
 [3.2.0]: https://github.com/subquery/subql/compare/types/3.1.2...types/3.2.0
 [3.1.2]: https://github.com/subquery/subql/compare/types/3.1.1...types/3.1.2

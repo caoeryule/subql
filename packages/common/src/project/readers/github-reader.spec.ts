@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {Reader} from '@subql/types-core';
@@ -14,7 +14,7 @@ describe('GithubReader', () => {
 
   it('should return the package json object', async () => {
     const data = await reader.getPkg();
-    expect(data.name).toBe('block-timestamp');
+    expect(data?.name).toBe('block-timestamp');
   });
 
   it('should return the project schema object', async () => {

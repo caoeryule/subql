@@ -1,16 +1,17 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import fs from 'fs';
 import path from 'path';
-import {promisify} from 'util';
 import {EventFragment, FunctionFragment} from '@ethersproject/abi';
-import {DEFAULT_TS_MANIFEST, loadFromJsonOrYaml} from '@subql/common';
+import {DEFAULT_TS_MANIFEST, loadFromJsonOrYaml, NETWORK_FAMILY} from '@subql/common';
+import {getAbiInterface} from '@subql/common-ethereum';
 import {SubqlRuntimeDatasource as EthereumDs} from '@subql/types-ethereum';
-import rimraf from 'rimraf';
-import {parseContractPath} from 'typechain';
+import {rimraf} from 'rimraf';
 import {Document, stringify} from 'yaml';
-import Generate, {SelectedMethod, UserInput} from '../commands/codegen/generate';
+import {makeCLIPrompt} from '../adapters/utils';
+import ImportAbi from '../commands/codegen/import-abi';
+import {loadDependency} from '../modulars';
 import {
   constructMethod,
   filterExistingMethods,
@@ -19,11 +20,12 @@ import {
   generateHandlers,
   generateManifestTs,
   generateManifestYaml,
-  getAbiInterface,
   getManifestData,
   prepareAbiDirectory,
   prepareInputFragments,
   yamlExtractor,
+  SelectedMethod,
+  UserInput,
 } from './generate-controller';
 
 const ROOT_MAPPING_DIR = 'src/mappings';
@@ -160,7 +162,8 @@ const originalManifestData2 = {
   ],
 };
 
-const abiName = parseContractPath('./erc721.json').name;
+const ethModule = loadDependency(NETWORK_FAMILY.ethereum, process.cwd());
+const abiName = ethModule.parseContractPath('./erc721.json').name;
 
 const mockUserInput: UserInput = {
   startBlock: 1,
@@ -175,9 +178,9 @@ jest.setTimeout(30000);
 describe('CLI codegen:generate, Can write to file', () => {
   afterEach(async () => {
     await Promise.all([
-      promisify(rimraf)(path.join(__dirname, '../../test/schemaTest/src')),
-      promisify(rimraf)(path.join(__dirname, '../../test/schemaTest/abis/abis.json')),
-      promisify(rimraf)(path.join(__dirname, '../../test/ts-manifest/mock-project.ts')),
+      rimraf(path.join(__dirname, '../../test/schemaTest/src')),
+      rimraf(path.join(__dirname, '../../test/schemaTest/abis/abis.json')),
+      rimraf(path.join(__dirname, '../../test/ts-manifest/mock-project.ts')),
       fs.promises.writeFile(path.join(PROJECT_PATH, MANIFEST_PATH), stringify(originalManifestData), {
         encoding: 'utf8',
         flag: 'w',
@@ -368,12 +371,19 @@ describe('CLI codegen:generate, Can write to file', () => {
     const rawEventFragments = abiInterface.events;
     const rawFunctionFragments = filterObjectsByStateMutability(abiInterface.functions);
 
-    const selectedEvents = await prepareInputFragments('event', 'approval, transfer', rawEventFragments, abiName);
+    const selectedEvents = await prepareInputFragments(
+      'event',
+      'approval, transfer',
+      rawEventFragments,
+      abiName,
+      makeCLIPrompt()
+    );
     const selectedFunctions = await prepareInputFragments(
       'function',
       'approve, transferFrom',
       rawFunctionFragments,
-      abiName
+      abiName,
+      makeCLIPrompt()
     );
 
     const [eventFrags, functionFrags] = filterExistingMethods(
@@ -421,8 +431,7 @@ describe('CLI codegen:generate, Can write to file', () => {
     await fs.promises.mkdir(path.join(PROJECT_PATH, ROOT_MAPPING_DIR));
     await fs.promises.writeFile(path.join(PROJECT_PATH, 'src/index.ts'), 'export * from "./mappings/mappingHandlers"');
 
-    await Generate.run([
-      '-f',
+    await ImportAbi.run([
       path.join(PROJECT_PATH, './generate-project-2.yaml'),
       '--events',
       'approval, transfer',
@@ -446,8 +455,7 @@ describe('CLI codegen:generate, Can write to file', () => {
     await fs.promises.writeFile(path.join(PROJECT_PATH, 'src/mappings/Erc721Handlers.ts'), 'zzzzzz');
 
     await expect(
-      Generate.run([
-        '-f',
+      ImportAbi.run([
         path.join(PROJECT_PATH, './generate-project-2.yaml'),
         '--events',
         'approval, transfer',

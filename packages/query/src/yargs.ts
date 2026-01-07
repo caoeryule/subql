@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 // import {argv as yargv} from 'yargs';
@@ -98,11 +98,6 @@ export function getYargsOption() {
         describe: 'Enable graphql playground',
         type: 'boolean',
       },
-      'playground-settings': {
-        demandOption: false,
-        describe: 'Pass the settings to the graphql playground (JSON format)',
-        type: 'string',
-      },
       'query-limit': {
         demandOption: false,
         describe: 'Set limit on number of query results per entity',
@@ -150,6 +145,12 @@ export function getYargsOption() {
         describe: 'Enable subscription service',
         type: 'boolean',
         default: false,
+      },
+      'sl-keep-alive-interval': {
+        demandOption: false,
+        describe: 'Schema listener keep-alive interval in milliseconds',
+        type: 'number',
+        default: 180000,
       },
     });
 }

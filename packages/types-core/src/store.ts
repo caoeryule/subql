@@ -1,7 +1,8 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 export type FunctionPropertyNames<T> = {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   [K in keyof T]: T[K] extends Function ? K : never;
 }[keyof T];
 
@@ -13,21 +14,40 @@ export type FieldsExpression<T> =
   | [field: keyof T, operator: SingleOperators, value: T[keyof T]]
   | [field: keyof T, operator: ArrayOperators, value: Array<T[keyof T]>];
 
-
 export interface Entity {
   id: string;
   _name?: string;
   save?: () => Promise<void>;
 }
 
+// Used in selective places where @dbType directive is used to change the ID type
+export type CompatEntity<T> = Omit<Entity, 'id'> & {id: T};
+
+export type GetOptions<T> = {
+  /**
+   * The number of items to return, if this exceeds the query-limit flag it will throw
+   * */
+  limit: number;
+  offset?: number;
+  orderBy?: keyof T;
+  orderDirection?: 'ASC' | 'DESC';
+};
+
 export interface Store {
   get(entity: string, id: string): Promise<Entity | undefined>;
-  getByFields<T extends Entity>(
-    entity: string,
-    filter: FieldsExpression<T>[],
-    options?: {offset?: number; limit?: number}
-  ): Promise<T[]>;
-  getByField(entity: string, field: string, value: any, options?: {offset?: number; limit?: number}): Promise<Entity[]>;
+  /**
+   * Gets entities matching the specified filters and options.
+   *
+   * ⚠️ This function will first search cache data followed by DB data. Please consider this when using order and offset options.⚠️
+   * */
+  getByFields<T extends Entity>(entity: string, filter: FieldsExpression<T>[], options: GetOptions<T>): Promise<T[]>;
+  /**
+   * This is an alias for getByFields with a single filter
+   * */
+  getByField<T extends Entity>(entity: string, field: keyof T, value: any, options: GetOptions<T>): Promise<T[]>;
+  /**
+   * This is an alias for getByField with limit set to 1
+   * */
   getOneByField(entity: string, field: string, value: any): Promise<Entity | undefined>;
   set(entity: string, id: string, data: Entity): Promise<void>;
   bulkCreate(entity: string, data: Entity[]): Promise<void>;

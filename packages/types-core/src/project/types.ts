@@ -1,7 +1,7 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import {ParentProject, RunnerSpecs, BaseDataSource, BaseTemplateDataSource} from './versioned';
+import {BaseDataSource, BaseTemplateDataSource, ParentProject, RunnerSpecs} from './versioned';
 
 /**
  * Represents a common subquery project configuration.
@@ -12,7 +12,7 @@ import {ParentProject, RunnerSpecs, BaseDataSource, BaseTemplateDataSource} from
 export interface CommonSubqueryProject<
   N extends IProjectNetworkConfig = IProjectNetworkConfig,
   DS extends BaseDataSource = BaseDataSource,
-  T extends BaseTemplateDataSource<DS> = BaseTemplateDataSource<DS>
+  T extends BaseTemplateDataSource<DS> = BaseTemplateDataSource<DS>,
 > {
   /**
    * The repository of your SubQuery project.
@@ -61,7 +61,7 @@ export interface CommonSubqueryProject<
   /**
    * The network configuration for the SubQuery project.
    *
-   * This defines what network you are wanting to index as well as the details on how to conect to it.
+   * This defines what network you are wanting to index as well as the details on how to connect to it.
    * @readonly
    * @type {N}
    */
@@ -91,7 +91,8 @@ export interface CommonSubqueryProject<
  * @interface
  * @extends {ProjectNetworkConfig}
  */
-export interface IProjectNetworkConfig extends ProjectNetworkConfig {
+export interface IProjectNetworkConfig<EndpointConfig extends IEndpointConfig = IEndpointConfig>
+  extends ProjectNetworkConfig<EndpointConfig> {
   /**
    * The unique identity of the chain.
    *
@@ -107,11 +108,11 @@ export interface IProjectNetworkConfig extends ProjectNetworkConfig {
   chainId: string;
 }
 
-export type DsProcessor<DS> = {
+export type DsProcessor<DS, P extends Record<string, any> = Record<string, any>, API = any> = {
   kind: string;
   validate: (ds: DS, assets: Record<string, string>) => void;
-  dsFilterProcessor: (ds: DS, api: any) => boolean;
-  handlerProcessors: Record<string, any>;
+  dsFilterProcessor: (ds: DS, api: API) => boolean;
+  handlerProcessors: P;
 };
 
 export interface ProjectRootAndManifest {
@@ -128,11 +129,17 @@ export interface IProjectManifest<D> {
   validate(): void;
 }
 
+/* Define specific behaviour for rate limits*/
+export interface IEndpointConfig {
+  /* Headers to be supplied with the requests to the endpoint */
+  headers?: Record<string, string>;
+}
+
 /**
  * Represents the network configuration for a project.
  * @interface
  */
-export interface ProjectNetworkConfig {
+export interface ProjectNetworkConfig<EndpointConfig extends IEndpointConfig = IEndpointConfig> {
   /**
    * The endpoint(s) for the network connection, which can be a single string or an array of strings.
    *
@@ -141,9 +148,9 @@ export interface ProjectNetworkConfig {
    * Public nodes may be rate limited, which can affect indexing speed
    * When developing your project we suggest adding a private API key
    *
-   * @type {string | string[]}
+   * @type {string | string[] | Record<string, IEndpointConfig> }
    */
-  endpoint: string | string[];
+  endpoint: string | string[] | Record<string, EndpointConfig>;
 
   /**
    * The SubQuery network dictionary endpoint (optional).
@@ -151,7 +158,7 @@ export interface ProjectNetworkConfig {
    *
    * @type {string}
    */
-  dictionary?: string;
+  dictionary?: string | string[];
 
   /**
    * An array of block numbers or block ranges to bypass (optional).

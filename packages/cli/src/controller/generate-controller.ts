@@ -1,33 +1,42 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import fs from 'fs';
 import path from 'path';
-import {FunctionFragment, EventFragment, ConstructorFragment, Fragment} from '@ethersproject/abi/src.ts/fragments';
-import {loadFromJsonOrYaml} from '@subql/common';
-import {
+import type {ConstructorFragment, EventFragment, Fragment, FunctionFragment} from '@ethersproject/abi';
+import {NETWORK_FAMILY} from '@subql/common';
+import type {
   EthereumDatasourceKind,
   EthereumHandlerKind,
+  EthereumLogFilter,
   EthereumTransactionFilter,
+  SubqlRuntimeDatasource as EthereumDs,
   SubqlRuntimeHandler,
-  parseContractPath,
-} from '@subql/common-ethereum';
-import {SubqlRuntimeDatasource as EthereumDs, EthereumLogFilter} from '@subql/types-ethereum';
-import chalk from 'chalk';
-import {Interface} from 'ethers/lib/utils';
-import * as inquirer from 'inquirer';
-import {upperFirst, difference, pickBy} from 'lodash';
+} from '@subql/types-ethereum';
+import {difference, pickBy, upperFirst} from 'lodash';
 import {Document, parseDocument, YAMLSeq} from 'yaml';
-import {SelectedMethod, UserInput} from '../commands/codegen/generate';
+import {Prompt} from '../adapters/utils';
 import {ADDRESS_REG, FUNCTION_REG, TOPICS_REG} from '../constants';
+import {loadDependency} from '../modulars';
 import {
   extractFromTs,
   renderTemplate,
   replaceArrayValueInTsManifest,
   resolveToAbsolutePath,
   splitArrayString,
-  tsStringify,
 } from '../utils';
+
+export interface SelectedMethod {
+  name: string;
+  method: string;
+}
+export interface UserInput {
+  startBlock: number;
+  functions: SelectedMethod[];
+  events: SelectedMethod[];
+  abiPath: string;
+  address?: string;
+}
 
 interface HandlerPropType {
   name: string;
@@ -41,14 +50,17 @@ interface AbiPropType {
 }
 
 const SCAFFOLD_HANDLER_TEMPLATE_PATH = path.resolve(__dirname, '../template/scaffold-handlers.ts.ejs');
-const ROOT_MAPPING_DIR = 'src/mappings';
-const DEFAULT_HANDLER_BUILD_PATH = './dist/index.js';
-const DEFAULT_ABI_DIR = '/abis';
+export const ROOT_MAPPING_DIR = 'src/mappings';
+export const DEFAULT_HANDLER_BUILD_PATH = './dist/index.js';
+export const DEFAULT_ABI_DIR = '/abis';
 
 export function removeKeyword(inputString: string): string {
   return inputString.replace(/^(event|function) /, '');
 }
 
+/**
+ * Copies the provided ABI file to the default ABI directory in the project root.
+ */
 export async function prepareAbiDirectory(abiPath: string, rootPath: string): Promise<void> {
   const abiDirPath = path.join(rootPath, DEFAULT_ABI_DIR);
 
@@ -64,13 +76,58 @@ export async function prepareAbiDirectory(abiPath: string, rootPath: string): Pr
   const ensuredAbiPath = resolveToAbsolutePath(abiPath);
 
   try {
-    const abiFileContent = await fs.promises.readFile(ensuredAbiPath, 'utf8');
-    await fs.promises.writeFile(path.join(abiDirPath, path.basename(ensuredAbiPath)), abiFileContent);
+    await fs.promises.copyFile(ensuredAbiPath, path.join(abiDirPath, path.basename(ensuredAbiPath)));
   } catch (e: any) {
     if (e.code === 'ENOENT') {
       throw new Error(`Unable to find abi at: ${abiPath}`);
     }
+    throw new Error(`Unable to copy abi file: ${e.message}`);
   }
+}
+
+/**
+ * Saves the provided ABI to a file in the default ABI directory.
+ * @param abi - The ABI to save.
+ * @param addressOrName - The name or address to use as the filename.
+ * @param rootPath - The root path of the project.
+ * @returns The path to the saved ABI file.
+ */
+export async function saveAbiToFile(abi: unknown, addressOrName: string, rootPath: string): Promise<string> {
+  const abiDirPath = path.join(rootPath, DEFAULT_ABI_DIR);
+  const filePath = path.join(abiDirPath, `${addressOrName}.abi.json`);
+
+  await fs.promises.writeFile(filePath, JSON.stringify(abi, null, 2));
+
+  return filePath;
+}
+
+export function prepareUserInput<T>(
+  selectedEvents: Record<string, EventFragment>,
+  selectedFunctions: Record<string, FunctionFragment>,
+  existingDs: T,
+  address: string | undefined,
+  startBlock: number,
+  abiFileName: string,
+  extractor: ManifestExtractor<T>
+): UserInput {
+  const [cleanEvents, cleanFunctions] = filterExistingMethods(
+    selectedEvents,
+    selectedFunctions,
+    existingDs,
+    address,
+    extractor
+  );
+
+  const constructedEvents = constructMethod<EventFragment>(cleanEvents);
+  const constructedFunctions = constructMethod<FunctionFragment>(cleanFunctions);
+
+  return {
+    startBlock: startBlock,
+    functions: constructedFunctions,
+    events: constructedEvents,
+    abiPath: `./abis/${abiFileName}`,
+    address: address,
+  };
 }
 
 export function constructMethod<T extends ConstructorFragment | Fragment>(
@@ -82,37 +139,6 @@ export function constructMethod<T extends ConstructorFragment | Fragment>(
       method: f,
     };
   });
-}
-
-export async function promptSelectables<T extends ConstructorFragment | Fragment>(
-  method: 'event' | 'function',
-  availableMethods: Record<string, T>
-): Promise<Record<string, T>> {
-  const selectedMethods: Record<string, T> = {};
-  const chosenFn = await inquirer.prompt({
-    name: method,
-    message: `Select ${method}`,
-    type: 'checkbox',
-    choices: Object.keys(availableMethods),
-  });
-  const choseArray = chosenFn[method] as string[];
-  choseArray.forEach((choice: string) => {
-    selectedMethods[choice] = availableMethods[choice];
-  });
-
-  return selectedMethods;
-}
-
-export function getAbiInterface(projectPath: string, abiFileName: string): Interface {
-  const abi = loadFromJsonOrYaml(path.join(projectPath, DEFAULT_ABI_DIR, abiFileName)) as any;
-  if (!Array.isArray(abi)) {
-    if (!abi.abi) {
-      throw new Error(`Provided ABI is not a valid ABI or Artifact`);
-    }
-    return new Interface(abi.abi);
-  } else {
-    return new Interface(abi);
-  }
 }
 
 export function filterObjectsByStateMutability(
@@ -164,8 +190,9 @@ function generateFormattedHandlers(
   return formattedHandlers;
 }
 
-export function constructDatasourcesTs(userInput: UserInput): string {
-  const abiName = parseContractPath(userInput.abiPath).name;
+export function constructDatasourcesTs(userInput: UserInput, projectPath: string): string {
+  const ethModule = loadDependency(NETWORK_FAMILY.ethereum, projectPath);
+  const abiName = ethModule.parseContractPath(userInput.abiPath).name;
   const formattedHandlers = generateFormattedHandlers(userInput, abiName, (kind) => kind);
   const handlersString = tsStringify(formattedHandlers);
 
@@ -184,16 +211,17 @@ export function constructDatasourcesTs(userInput: UserInput): string {
   }`;
 }
 
-export function constructDatasourcesYaml(userInput: UserInput): EthereumDs {
-  const abiName = parseContractPath(userInput.abiPath).name;
+export function constructDatasourcesYaml(userInput: UserInput, projectPath: string): EthereumDs {
+  const ethModule = loadDependency(NETWORK_FAMILY.ethereum, projectPath);
+  const abiName = ethModule.parseContractPath(userInput.abiPath).name;
   const formattedHandlers = generateFormattedHandlers(userInput, abiName, (kind) => {
-    if (kind === 'EthereumHandlerKind.Call') return EthereumHandlerKind.Call;
-    return EthereumHandlerKind.Event;
+    if (kind === 'EthereumHandlerKind.Call') return 'ethereum/TransactionHandler' as EthereumHandlerKind.Call;
+    return 'ethereum/LogHandler' as EthereumHandlerKind.Event;
   });
   const assets = new Map([[abiName, {file: userInput.abiPath}]]);
 
   return {
-    kind: EthereumDatasourceKind.Runtime,
+    kind: 'ethereum/Runtime' as EthereumDatasourceKind.Runtime,
     startBlock: userInput.startBlock,
     options: {
       abi: abiName,
@@ -212,10 +240,31 @@ export async function prepareInputFragments<T extends ConstructorFragment | Frag
   type: 'event' | 'function',
   rawInput: string | undefined,
   availableFragments: Record<string, T>,
-  abiName: string
+  abiName: string,
+  prompt: Prompt | null
 ): Promise<Record<string, T>> {
   if (!rawInput) {
-    return promptSelectables<T>(type, availableFragments);
+    if (!prompt) {
+      // No items selected or
+      return {};
+    }
+
+    const selected = await prompt({
+      message: `Select ${type}`,
+      type: 'string',
+      options: Object.keys(availableFragments),
+      multiple: true,
+    });
+
+    return Object.entries(availableFragments)
+      .filter(([key]) => selected.includes(key))
+      .reduce(
+        (acc, [key, value]) => {
+          acc[key as string] = value;
+          return acc;
+        },
+        {} as Record<string, T>
+      );
   }
 
   if (rawInput === '*') {
@@ -234,7 +283,7 @@ export async function prepareInputFragments<T extends ConstructorFragment | Frag
     });
 
     if (!matchFragment) {
-      throw new Error(chalk.red(`'${input}' is not a valid ${type} on ${abiName}`));
+      throw new Error(`'${input}' is not a valid ${type} on ${abiName}`);
     }
   });
 
@@ -289,16 +338,21 @@ export const yamlExtractor: ManifestExtractor<EthereumDs[]> = (dataSources, case
 
   dataSources
     .filter((d: EthereumDs) => {
-      const dsAddress = d.options.address?.toLowerCase();
+      const dsAddress = d.options?.address?.toLowerCase();
       return casedInputAddress ? casedInputAddress === dsAddress : !dsAddress;
     })
     .forEach((ds: EthereumDs) => {
       ds.mapping.handlers.forEach((handler) => {
-        if ('topics' in handler.filter) {
-          existingEvents.push((handler.filter as EthereumLogFilter).topics[0]);
+        if (!handler.filter) return;
+
+        const topics = (handler.filter as EthereumLogFilter).topics?.[0];
+        const func = (handler.filter as EthereumTransactionFilter).function;
+
+        if (topics) {
+          existingEvents.push(topics);
         }
-        if ('function' in handler.filter) {
-          existingFunctions.push((handler.filter as EthereumTransactionFilter).function);
+        if (func) {
+          existingFunctions.push(func);
         }
       });
     });
@@ -351,7 +405,7 @@ export async function generateManifestTs(
   userInput: UserInput,
   existingManifestData: string
 ): Promise<void> {
-  const inputDs = constructDatasourcesTs(userInput);
+  const inputDs = constructDatasourcesTs(userInput, manifestPath);
 
   const extractedDs = extractFromTs(existingManifestData, {dataSources: undefined}) as {dataSources: string};
   const v = prependDatasources(extractedDs.dataSources, inputDs);
@@ -364,7 +418,7 @@ export async function generateManifestYaml(
   userInput: UserInput,
   existingManifestData: Document
 ): Promise<void> {
-  const inputDs = constructDatasourcesYaml(userInput);
+  const inputDs = constructDatasourcesYaml(userInput, manifestPath);
   const dsNode = existingManifestData.get('dataSources') as YAMLSeq;
   if (!dsNode || !dsNode.items.length) {
     // To ensure output is in yaml format
@@ -419,7 +473,35 @@ export async function generateHandlers(
       helper: {upperFirst},
     });
     fs.appendFileSync(path.join(projectPath, 'src/index.ts'), `\nexport * from "./mappings/${fileName}"`);
-  } catch (e) {
+  } catch (e: any) {
     throw new Error(`Unable to generate handler scaffolds. ${e.message}`);
   }
+}
+
+export function tsStringify(
+  obj: SubqlRuntimeHandler | SubqlRuntimeHandler[] | string,
+  indent = 2,
+  currentIndent = 0
+): string {
+  if (typeof obj !== 'object' || obj === null) {
+    if (typeof obj === 'string' && obj.includes('EthereumHandlerKind')) {
+      return obj; // Return the string as-is without quotes
+    }
+    return JSON.stringify(obj);
+  }
+
+  if (Array.isArray(obj)) {
+    const items = obj.map((item) => tsStringify(item, indent, currentIndent + indent));
+    return `[\n${items.map((item) => ' '.repeat(currentIndent + indent) + item).join(',\n')}\n${' '.repeat(
+      currentIndent
+    )}]`;
+  }
+
+  const entries = Object.entries(obj);
+  const result = entries.map(([key, value]) => {
+    const valueStr = tsStringify(value, indent, currentIndent + indent);
+    return `${' '.repeat(currentIndent + indent)}${key}: ${valueStr}`;
+  });
+
+  return `{\n${result.join(',\n')}\n${' '.repeat(currentIndent)}}`;
 }

@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {Inject, Injectable} from '@nestjs/common';
@@ -11,7 +11,8 @@ import {NodeConfig} from '../configure/NodeConfig';
 import {getLogger} from '../logger';
 import {TestSandbox} from './sandbox';
 import {StoreService} from './store.service';
-import {IIndexerManager} from './types';
+import {cacheProviderFlushData} from './storeModelProvider';
+import {IBlock, IIndexerManager} from './types';
 
 const logger = getLogger('test-runner');
 
@@ -28,21 +29,39 @@ export class TestRunner<A, SA, B, DS> {
   private passedTests = 0;
   private failedTests = 0;
   constructor(
-    @Inject('IApi') protected readonly apiService: IApi<A, SA, B[]>,
+    @Inject('APIService') protected readonly apiService: IApi<A, SA, IBlock<B>[]>,
     protected readonly storeService: StoreService,
     protected readonly sequelize: Sequelize,
     protected readonly nodeConfig: NodeConfig,
     @Inject('IIndexerManager') protected readonly indexerManager: IIndexerManager<B, DS>
   ) {}
 
+  private async fetchBlock(height: number, test: SubqlTest): Promise<IBlock<B>> {
+    try {
+      const [block] = await this.apiService.fetchBlocks([height]);
+      return block;
+    } catch (e: any) {
+      logger.warn(`Test: ${test.name} field due to fetch block error`, e);
+      this.failedTestSummary = {
+        testName: test.name,
+        entityId: undefined,
+        entityName: undefined,
+        failedAttributes: [`Fetch Block Error:\n${e.message}`],
+      };
+
+      this.failedTests++;
+      throw e;
+    }
+  }
+
   async runTest(
     test: SubqlTest,
     sandbox: TestSandbox,
     indexBlock: (
-      block: B,
+      block: IBlock<B>,
       handler: string,
       indexerManager: IIndexerManager<B, DS>,
-      apiService?: IApi<A, SA, B[]>
+      apiService?: IApi<A, SA, IBlock<B>[]>
     ) => Promise<void>
   ): Promise<{
     passedTests: number;
@@ -54,21 +73,23 @@ export class TestRunner<A, SA, B, DS> {
     try {
       // Fetch block
       logger.debug('Fetching block');
-      const [block] = await this.apiService.fetchBlocks([test.blockHeight]);
+      const block = await this.fetchBlock(test.blockHeight, test);
 
-      this.storeService.setBlockHeight(test.blockHeight);
+      await this.storeService.setBlockHeader(block.getHeader());
+      // Ensure a block height is set so that data is flushed correctly
+      await this.storeService.modelProvider.metadata.set('lastProcessedHeight', test.blockHeight - 1);
       const store = this.storeService.getStore();
       sandbox.freeze(store, 'store');
 
       // Init entities
       logger.debug('Initializing entities');
-      await Promise.all(test.dependentEntities.map((entity) => entity.save?.()));
+      await Promise.all(test.dependentEntities.map((entity) => entity.save?.() ?? Promise.resolve()));
 
       logger.debug('Running handler');
 
       try {
         await indexBlock(block, test.handler, this.indexerManager, this.apiService);
-        await this.storeService.storeCache.flushCache(true, true);
+        await cacheProviderFlushData(this.storeService.modelProvider, true);
       } catch (e: any) {
         logger.warn(`Test: ${test.name} field due to runtime error`, e);
         this.failedTestSummary = {
@@ -94,14 +115,25 @@ export class TestRunner<A, SA, B, DS> {
         if (!actualEntity) {
           failedAttributes.push(`\t\tExpected entity was not found`);
         } else {
-          const attributes = actualEntity;
-          Object.keys(attributes).map((attr) => {
+          Object.keys(actualEntity).forEach((attr) => {
+            // EntityClass has private store on it, don't need to check it.
+            if (attr === '#store') return;
+
             const expectedAttr = (expectedEntity as Record<string, any>)[attr] ?? null;
             const actualAttr = (actualEntity as Record<string, any>)[attr] ?? null;
 
             if (!isEqual(expectedAttr, actualAttr)) {
+              // Converts dates into a format so that ms is visible
+              const fmtValue = (value: any) => {
+                if (value instanceof Date) {
+                  return value.toISOString();
+                }
+                return value;
+              };
               failedAttributes.push(
-                `\t\tattribute: "${attr}":\n\t\t\texpected: "${expectedAttr}"\n\t\t\tactual:   "${actualAttr}"\n`
+                `\t\tattribute: "${attr}":\n\t\t\texpected: "${fmtValue(expectedAttr)}"\n\t\t\tactual:   "${fmtValue(
+                  actualAttr
+                )}"\n`
               );
             }
           });
@@ -123,7 +155,7 @@ export class TestRunner<A, SA, B, DS> {
         }
       }
 
-      await this.storeService.storeCache.flushCache(true, true);
+      await cacheProviderFlushData(this.storeService.modelProvider, true);
       logger.info(
         `Test: ${test.name} completed with ${chalk.green(`${this.passedTests} passed`)} and ${chalk.red(
           `${this.failedTests} failed`

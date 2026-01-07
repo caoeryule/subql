@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 export enum ApiErrorType {
@@ -41,5 +41,15 @@ export class LargeResponseError extends ApiConnectionError {
     const newMessage = `Oversized RPC node response. This issue is related to the network's RPC nodes configuration, not your application. You may report it to the network's maintainers or try a different RPC node.\n\n${e.message}`;
 
     super('RpcInternalError', newMessage, ApiErrorType.Default);
+  }
+}
+
+export class MetadataMismatchError extends Error {
+  constructor(metadata: string, expected: string, actual: string) {
+    super(
+      `Value of ${metadata} does not match across all endpoints\n
+       Expected: ${expected}
+       Actual: ${actual}`
+    );
   }
 }

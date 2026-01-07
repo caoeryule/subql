@@ -6,6 +6,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.5] - 2025-11-20
+### Changed
+- Update `@subql/common`
+
+## [4.5.3] - 2025-10-22
+### Changed
+- Update `@subql/common`
+
+## [4.5.2] - 2025-07-30
+### Changed
+- Lock down class-transformer and class-validator versions (#2871)
+
+## [4.5.1] - 2025-07-17
+### Changed
+- Workspace dependencies now match to patch versions rather than exact (#2855)
+
+## [4.5.0] - 2025-07-01
+### Removed
+- Test files and artifacts from published package (#2838)
+
+## [4.4.0] - 2025-04-17
+### Changed
+- Update `@subql/common`
+
+## [4.3.7] - 2025-02-04
+### Changed
+- Update copyright header to 2025
+
+## [4.3.6] - 2025-01-28
+### Changed
+- Update `@subql/common`
+
+## [4.3.5] - 2024-12-11
+### Changed
+- Update `@subql/common`
+
+## [4.3.4] - 2024-11-25
+### Changed
+- Bump version with `@subql/common`
+
+## [4.3.3] - 2024-11-22
+### Changed
+- Update common (#2584)
+
+## [4.3.2] - 2024-10-23
+### Changed
+- Bump version with `@subql/common`
+
+## [4.3.1] - 2024-09-25
+### Changed
+- Bump common, Added manifest support for query-subgraph.
+
+## [4.3.0] - 2024-08-05
+### Changed
+- Update dependencies (#2518)
+
+## [4.2.0] - 2024-08-01
+### Added
+- Updated `@subql\common` with support for endpoint specific configs (#2511)
+
+## [4.1.1] - 2024-07-25
+### Changed
+- Bump version with `@subql/common`
+- input type updated in `isRuntimeDs` (#2496)
+
+## [4.1.0] - 2024-07-11
+### Removed
+- Unused functions (#2484)
+
+### Changed
+- Bump with `subql/common`
+
+## [4.0.1] - 2024-07-09
+### Changed
+- Changes to ts build settings (#2475)
+
+## [4.0.0] - 2024-07-01
+### Added
+- Enable ts strict setting
+- Breaking Change: Add alias `parseProjectManifest`, also follow type of `INetworkCommonModule` (#2462)
+
+## [3.8.1] - 2024-06-21
+### Fixed
+- Fix `EventFilter` incorrectly extend `BlockFilter`, lead dictionary error (#2463)
+
+## [3.8.0] - 2024-06-05
+### Changed
+- Bump with common
+
+## [3.7.0] - 2024-05-22
+### Changed
+- Bump with common
+
+## [3.6.0] - 2024-05-08
+### Changed
+- Bump with types, update dependencies
+
+## [3.5.0] - 2024-04-24
+### Changed
+- Update dependencies
+
+## [3.4.0] - 2024-03-28
+### Changed
+- version bump with `@subql/common` 3.5.0
+
+## [3.3.2] - 2024-02-23
+### Changed
+- version bump with `@subql/common`
+
+## [3.3.1] - 2024-02-07
+### Changed
+- Update `@subql/common`
+
 ## [3.2.1] - 2023-12-14
 ### Changed
 - Update @subql/common
@@ -124,7 +237,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - init commit
 
-[Unreleased]: https://github.com/subquery/subql/compare/common-substrate/3.2.1...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/common-substrate/4.5.4...HEAD
+[4.5.4]: https://github.com/subquery/subql/compare/common-substrate/4.5.3...common-substrate/4.5.4
+[4.5.3]: https://github.com/subquery/subql/compare/common-substrate/4.5.2...common-substrate/4.5.3
+[4.5.2]: https://github.com/subquery/subql/compare/common-substrate/4.5.1...common-substrate/4.5.2
+[4.5.1]: https://github.com/subquery/subql/compare/common-substrate/4.5.0...common-substrate/4.5.1
+[4.5.0]: https://github.com/subquery/subql/compare/common-substrate/4.4.0...common-substrate/4.5.0
+[4.4.0]: https://github.com/subquery/subql/compare/common-substrate/4.3.7...common-substrate/4.4.0
+[4.3.7]: https://github.com/subquery/subql/compare/common-substrate/4.3.6...common-substrate/4.3.7
+[4.3.6]: https://github.com/subquery/subql/compare/common-substrate/4.3.5...common-substrate/4.3.6
+[4.3.5]: https://github.com/subquery/subql/compare/common-substrate/4.3.4...common-substrate/4.3.5
+[4.3.4]: https://github.com/subquery/subql/compare/common-substrate/4.3.3...common-substrate/4.3.4
+[4.3.3]: https://github.com/subquery/subql/compare/common-substrate/4.3.2...common-substrate/4.3.3
+[4.3.2]: https://github.com/subquery/subql/compare/common-substrate/4.3.1...common-substrate/4.3.2
+[4.3.1]: https://github.com/subquery/subql/compare/common-substrate/4.3.0...common-substrate/4.3.1
+[4.3.0]: https://github.com/subquery/subql/compare/common-substrate/4.2.0...common-substrate/4.3.0
+[4.2.0]: https://github.com/subquery/subql/compare/common-substrate/4.1.1...common-substrate/4.2.0
+[4.1.1]: https://github.com/subquery/subql/compare/common-substrate/4.1.0...common-substrate/4.1.1
+[4.1.0]: https://github.com/subquery/subql/compare/common-substrate/4.0.1...common-substrate/4.1.0
+[4.0.1]: https://github.com/subquery/subql/compare/common-substrate/4.0.0...common-substrate/4.0.1
+[4.0.0]: https://github.com/subquery/subql/compare/common-substrate/3.8.1...common-substrate/4.0.0
+[3.8.1]: https://github.com/subquery/subql/compare/common-substrate/3.8.0...common-substrate/3.8.1
+[3.8.0]: https://github.com/subquery/subql/compare/common-substrate/3.7.0...common-substrate/3.8.0
+[3.7.0]: https://github.com/subquery/subql/compare/common-substrate/3.6.0...common-substrate/3.7.0
+[3.6.0]: https://github.com/subquery/subql/compare/common-substrate/3.5.0...common-substrate/3.6.0
+[3.5.0]: https://github.com/subquery/subql/compare/common-substrate/3.4.0...common-substrate/3.5.0
+[3.4.0]: https://github.com/subquery/subql/compare/common-substrate/3.3.2...common-substrate/3.4.0
+[3.3.2]: https://github.com/subquery/subql/compare/common-substrate/3.3.1...common-substrate/3.3.2
+[3.3.1]: https://github.com/subquery/subql/compare/common-substrate/3.2.1...common-substrate/3.3.1
 [3.2.1]: https://github.com/subquery/subql/compare/common-substrate/3.2.0...common-substrate/3.2.1
 [3.2.0]: https://github.com/subquery/subql/compare/common-substrate/3.1.2...common-substrate/3.2.0
 [3.1.2]: https://github.com/subquery/subql/compare/common-substrate/3.1.1...common-substrate/3.1.2

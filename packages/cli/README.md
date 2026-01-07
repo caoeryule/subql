@@ -5,7 +5,7 @@ CLI for SubQuery
 [![oclif](https://img.shields.io/badge/cli-oclif-brightgreen.svg)](https://oclif.io)
 [![Version](https://img.shields.io/npm/v/@subql/cli.svg)](https://npmjs.org/package/@subql/cli)
 [![Downloads/week](https://img.shields.io/npm/dw/@subql/cli.svg)](https://npmjs.org/package/@subql/cli)
-[![License](https://img.shields.io/npm/l/@subql/cli.svg)](https://github.com/packages/cli/blob/master/package.json)
+[![License](https://img.shields.io/npm/l/@subql/cli.svg)](https://github.com/subquery/subql/blob/main/packages/cli/LICENSE)
 
 <!-- toc -->
 
@@ -23,7 +23,7 @@ $ npm install -g @subql/cli
 $ subql COMMAND
 running command...
 $ subql (--version)
-@subql/cli/4.2.6-0 linux-x64 node-v18.19.0
+@subql/cli/6.6.3-0 linux-x64 node-v24.11.1
 $ subql --help [COMMAND]
 USAGE
   $ subql COMMAND
@@ -36,332 +36,790 @@ USAGE
 
 <!-- commands -->
 
-- [`subql build`](#subql-build)
-- [`subql codegen`](#subql-codegen)
-- [`subql codegen:generate`](#subql-codegengenerate)
-- [`subql deployment`](#subql-deployment)
-- [`subql deployment:delete`](#subql-deploymentdelete)
-- [`subql deployment:deploy`](#subql-deploymentdeploy)
-- [`subql deployment:promote`](#subql-deploymentpromote)
-- [`subql init [PROJECTNAME]`](#subql-init-projectname)
-- [`subql multi-chain:add`](#subql-multi-chainadd)
-- [`subql project`](#subql-project)
-- [`subql project:create-project`](#subql-projectcreate-project)
-- [`subql project:delete-project`](#subql-projectdelete-project)
-- [`subql publish`](#subql-publish)
+- [`subql build [LOCATION]`](#subql-build-location)
+- [`subql build-manifest [LOCATION]`](#subql-build-manifest-location)
+- [`subql codegen [LOCATION]`](#subql-codegen-location)
+- [`subql codegen:import-abi LOCATION`](#subql-codegenimport-abi-location)
+- [`subql import-abi LOCATION`](#subql-import-abi-location)
+- [`subql init NAME`](#subql-init-name)
+- [`subql mcp`](#subql-mcp)
+- [`subql migrate`](#subql-migrate)
+- [`subql multi-chain:add [LOCATION]`](#subql-multi-chainadd-location)
+- [`subql network:add-deployment-boost`](#subql-networkadd-deployment-boost)
+- [`subql network:connect-wallet`](#subql-networkconnect-wallet)
+- [`subql network:create-api-key NAME`](#subql-networkcreate-api-key-name)
+- [`subql network:create-deployment`](#subql-networkcreate-deployment)
+- [`subql network:create-flex-plan`](#subql-networkcreate-flex-plan)
+- [`subql network:create-project`](#subql-networkcreate-project)
+- [`subql network:disconnect-wallet`](#subql-networkdisconnect-wallet)
+- [`subql network:list-account-boosts`](#subql-networklist-account-boosts)
+- [`subql network:list-api-keys`](#subql-networklist-api-keys)
+- [`subql network:list-deployment-boosts`](#subql-networklist-deployment-boosts)
+- [`subql network:list-deployment-indexers`](#subql-networklist-deployment-indexers)
+- [`subql network:list-deployments`](#subql-networklist-deployments)
+- [`subql network:list-flex-plans`](#subql-networklist-flex-plans)
+- [`subql network:list-projects`](#subql-networklist-projects)
+- [`subql network:remove-api-key NAME`](#subql-networkremove-api-key-name)
+- [`subql network:remove-deployment-boost`](#subql-networkremove-deployment-boost)
+- [`subql network:stop-flex-plan`](#subql-networkstop-flex-plan)
+- [`subql network:swap-deployment-boost`](#subql-networkswap-deployment-boost)
+- [`subql onfinality:create-deployment`](#subql-onfinalitycreate-deployment)
+- [`subql onfinality:create-multichain-deployment [LOCATION]`](#subql-onfinalitycreate-multichain-deployment-location)
+- [`subql onfinality:create-project`](#subql-onfinalitycreate-project)
+- [`subql onfinality:delete-deployment`](#subql-onfinalitydelete-deployment)
+- [`subql onfinality:delete-project`](#subql-onfinalitydelete-project)
+- [`subql onfinality:promote-deployment`](#subql-onfinalitypromote-deployment)
+- [`subql publish [LOCATION]`](#subql-publish-location)
 
-## `subql build`
+## `subql build [LOCATION]`
 
-Build this SubQuery project code
-
-```
-USAGE
-  $ subql build [-f <value>] [-o <value>] [--mode production|prod|development|dev] [-s]
-
-FLAGS
-  -f, --location=<value>  local folder or manifest file to run build
-  -o, --output=<value>    output folder of build e.g. dist
-  -s, --silent            silent mode
-  --mode=<option>         [default: production]
-                          <options: production|prod|development|dev>
-
-DESCRIPTION
-  Build this SubQuery project code
-```
-
-_See code: [lib/commands/build/index.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/build/index.js)_
-
-## `subql codegen`
-
-Generate schemas for graph node
-
-```
-USAGE
-  $ subql codegen [-l <value>] [-f <value>]
-
-FLAGS
-  -f, --file=<value>      specify manifest file path (will overwrite -l if both used)
-  -l, --location=<value>  [deprecated] local folder to run codegen in. please use file flag instead
-
-DESCRIPTION
-  Generate schemas for graph node
-```
-
-_See code: [lib/commands/codegen/index.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/codegen/index.js)_
-
-## `subql codegen:generate`
-
-Generate Project.yaml and mapping functions based on provided ABI
+Build this SubQuery project code into a bundle
 
 ```
 USAGE
-  $ subql codegen:generate --abiPath <value> --startBlock <value> [-f <value>] [--events <value>] [--functions
-    <value>] [--address <value>]
-
-FLAGS
-  -f, --file=<value>    specify manifest file path
-  --abiPath=<value>     (required) path to abi from root
-  --address=<value>     contract address
-  --events=<value>      abi events, --events="approval, transfer"
-  --functions=<value>   abi functions,  --functions="approval, transfer"
-  --startBlock=<value>  (required) startBlock
-
-DESCRIPTION
-  Generate Project.yaml and mapping functions based on provided ABI
-```
-
-_See code: [lib/commands/codegen/generate.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/codegen/generate.js)_
-
-## `subql deployment`
-
-Deploy to hosted service
-
-```
-USAGE
-  $ subql deployment --endpoint <value> [--options deploy|promote|delete] [--org <value>] [--projectName
-    <value>] [--ipfsCID <value>] [--type stage|primary] [--indexerVersion <value>] [--queryVersion <value>] [--dict
-    <value>] [--indexerUnsafe] [--indexerBatchSize <value>] [--indexerSubscription] [--disableHistorical]
-    [--indexerWorkers <value>] [--queryUnsafe] [--querySubscription] [--queryTimeout <value>] [--queryMaxConnection
-    <value>] [--queryAggregate] [-d] [--project_name <value>] [--deploymentID <value>]
-
-FLAGS
-  -d, --useDefaults             Use default values for indexerVersion, queryVersion, dictionary, endpoint
-  --deploymentID=<value>        Enter deployment ID
-  --dict=<value>                Enter dictionary
-  --disableHistorical           Disable Historical Data
-  --endpoint=<value>            (required) Enter endpoint
-  --indexerBatchSize=<value>    Enter batchSize from 1 to 30
-  --indexerSubscription         Enable Indexer subscription
-  --indexerUnsafe               Enable indexer unsafe
-  --indexerVersion=<value>      Enter indexer-version
-  --indexerWorkers=<value>      Enter worker threads from 1 to 30
-  --ipfsCID=<value>             Enter IPFS CID
-  --options=<option>            <options: deploy|promote|delete>
-  --org=<value>                 Enter organization name
-  --projectName=<value>         Enter project name
-  --project_name=<value>        Enter project name
-  --queryAggregate              Enable Aggregate
-  --queryMaxConnection=<value>  Enter MaxConnection from 1 to 10
-  --querySubscription           Enable Query subscription
-  --queryTimeout=<value>        Enter timeout from 1000ms to 60000ms
-  --queryUnsafe                 Enable indexer unsafe
-  --queryVersion=<value>        Enter query-version
-  --type=<option>               [default: primary]
-                                <options: stage|primary>
-
-DESCRIPTION
-  Deploy to hosted service
-```
-
-_See code: [lib/commands/deployment/index.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/deployment/index.js)_
-
-## `subql deployment:delete`
-
-Delete Deployment
-
-```
-USAGE
-  $ subql deployment:delete [--org <value>] [--project_name <value>] [--deploymentID <value>]
-
-FLAGS
-  --deploymentID=<value>  Enter deployment ID
-  --org=<value>           Enter organization name
-  --project_name=<value>  Enter project name
-
-DESCRIPTION
-  Delete Deployment
-```
-
-_See code: [lib/commands/deployment/delete.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/deployment/delete.js)_
-
-## `subql deployment:deploy`
-
-Deployment to hosted service
-
-```
-USAGE
-  $ subql deployment:deploy --endpoint <value> [--org <value>] [--projectName <value>] [--ipfsCID <value>] [--type
-    stage|primary] [--indexerVersion <value>] [--queryVersion <value>] [--dict <value>] [--indexerUnsafe]
-    [--indexerBatchSize <value>] [--indexerSubscription] [--disableHistorical] [--indexerWorkers <value>]
-    [--queryUnsafe] [--querySubscription] [--queryTimeout <value>] [--queryMaxConnection <value>] [--queryAggregate]
-    [-d]
-
-FLAGS
-  -d, --useDefaults             Use default values for indexerVersion, queryVersion, dictionary, endpoint
-  --dict=<value>                Enter dictionary
-  --disableHistorical           Disable Historical Data
-  --endpoint=<value>            (required) Enter endpoint
-  --indexerBatchSize=<value>    Enter batchSize from 1 to 30
-  --indexerSubscription         Enable Indexer subscription
-  --indexerUnsafe               Enable indexer unsafe
-  --indexerVersion=<value>      Enter indexer-version
-  --indexerWorkers=<value>      Enter worker threads from 1 to 30
-  --ipfsCID=<value>             Enter IPFS CID
-  --org=<value>                 Enter organization name
-  --projectName=<value>         Enter project name
-  --queryAggregate              Enable Aggregate
-  --queryMaxConnection=<value>  Enter MaxConnection from 1 to 10
-  --querySubscription           Enable Query subscription
-  --queryTimeout=<value>        Enter timeout from 1000ms to 60000ms
-  --queryUnsafe                 Enable indexer unsafe
-  --queryVersion=<value>        Enter query-version
-  --type=<option>               [default: primary]
-                                <options: stage|primary>
-
-DESCRIPTION
-  Deployment to hosted service
-```
-
-_See code: [lib/commands/deployment/deploy.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/deployment/deploy.js)_
-
-## `subql deployment:promote`
-
-Promote Deployment
-
-```
-USAGE
-  $ subql deployment:promote [--org <value>] [--project_name <value>] [--deploymentID <value>]
-
-FLAGS
-  --deploymentID=<value>  Enter deployment ID
-  --org=<value>           Enter organization name
-  --project_name=<value>  Enter project name
-
-DESCRIPTION
-  Promote Deployment
-```
-
-_See code: [lib/commands/deployment/promote.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/deployment/promote.js)_
-
-## `subql init [PROJECTNAME]`
-
-Initialize a scaffold subquery project
-
-```
-USAGE
-  $ subql init [PROJECTNAME] [-f] [-l <value>] [--install-dependencies] [--npm] [--abiPath <value>]
+  $ subql build [LOCATION] [--output <value>]
 
 ARGUMENTS
-  PROJECTNAME  Give the starter project name
+  LOCATION  The path to the project, this can be a directory or a project manifest file.
 
 FLAGS
-  -f, --force
-  -l, --location=<value>  local folder to create the project in
-  --abiPath=<value>       path to abi file
-  --install-dependencies  Install dependencies as well
-  --npm                   Force using NPM instead of yarn, only works with `install-dependencies` flag
+  --output=<value>  [default: dist] The output location relative to the location
 
 DESCRIPTION
-  Initialize a scaffold subquery project
+  Build this SubQuery project code into a bundle
 ```
 
-_See code: [lib/commands/init.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/init.js)_
+_See code: [src/commands/build.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/build.ts)_
 
-## `subql multi-chain:add`
+## `subql build-manifest [LOCATION]`
 
-Add new chain manifest to multi-chain configuration
+Build TypeScript manifest file to YAML (generates project.yaml from project.ts)
 
 ```
 USAGE
-  $ subql multi-chain:add [-f <value>] [-c <value>]
+  $ subql build-manifest [LOCATION]
 
-FLAGS
-  -c, --chainManifestPath=<value>  path to the new chain manifest
-  -f, --multichain=<value>         [default: /home/runner/work/subql/subql/packages/cli] specify multichain manifest
-                                   file path
+ARGUMENTS
+  LOCATION  The path to the project, this can be a directory or a project manifest file.
 
 DESCRIPTION
-  Add new chain manifest to multi-chain configuration
+  Build TypeScript manifest file to YAML (generates project.yaml from project.ts)
 ```
 
-_See code: [lib/commands/multi-chain/add.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/multi-chain/add.js)_
+_See code: [src/commands/build-manifest.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/build-manifest.ts)_
 
-## `subql project`
+## `subql codegen [LOCATION]`
 
-Create/Delete project
+Generate entity types from the GraphQL schema and contract interfaces
 
 ```
 USAGE
-  $ subql project [--options create|delete] [--org <value>] [--projectName <value>] [--gitRepo <value>]
-    [--logoURL <value>] [--subtitle <value>] [--description <value>] [--apiVersion <value>] [--dedicatedDB <value>]
+  $ subql codegen [LOCATION]
 
-FLAGS
-  --apiVersion=<value>   [default: 2] Enter api version
-  --dedicatedDB=<value>  Enter dedicated DataBase
-  --description=<value>  Enter description
-  --gitRepo=<value>      Enter git repository
-  --logoURL=<value>      Enter logo URL
-  --options=<option>     <options: create|delete>
-  --org=<value>          Enter organization name
-  --projectName=<value>  Enter project name
-  --subtitle=<value>     Enter subtitle
+ARGUMENTS
+  LOCATION  The project directory or path to project manifest.
 
 DESCRIPTION
-  Create/Delete project
+  Generate entity types from the GraphQL schema and contract interfaces
 ```
 
-_See code: [lib/commands/project/index.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/project/index.js)_
+_See code: [src/commands/codegen/index.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/codegen/index.ts)_
 
-## `subql project:create-project`
+## `subql codegen:import-abi LOCATION`
 
-Create Project on Hosted Service
+Import and ABI to generate project handlers and mapping functions based on an Ethereum ABI. If address is provided, it will attempt to fetch the ABI and start block from the Etherscan.
 
 ```
 USAGE
-  $ subql project:create-project [--org <value>] [--projectName <value>] [--gitRepo <value>] [--logoURL <value>] [--subtitle
-    <value>] [--description <value>] [--apiVersion <value>] [--dedicatedDB <value>]
+  $ subql codegen:import-abi LOCATION [--address <value>] [--abiName <value>] [--startBlock <value>] [--abiPath <value>]
+    [--events <value>] [--functions <value>]
+
+ARGUMENTS
+  LOCATION  The path to the project, this can be a directory or a project manifest file.
 
 FLAGS
-  --apiVersion=<value>   [default: 2] Enter api version
-  --dedicatedDB=<value>  Enter dedicated DataBase
-  --description=<value>  Enter description
-  --gitRepo=<value>      Enter git repository
-  --logoURL=<value>      Enter logo URL
-  --org=<value>          Enter organization name
-  --projectName=<value>  Enter project name
-  --subtitle=<value>     Enter subtitle
+  --abiName=<value>     The contracts name, if not provided, the contract address will be used if the ABI is fetched
+                        from Etherscan
+  --abiPath=<value>     The path to the ABI file
+  --address=<value>     The contracts address
+  --events=<value>      ABI events to generate handlers for. Use '*' for all. e.g. --events="approval, transfer"
+  --functions=<value>   ABI functions to generate handlers for. Use '*' for all. e.g. --functions="approval, transfer"
+  --startBlock=<value>  The start block of the handler, generally the block the contract is deployed.
 
 DESCRIPTION
-  Create Project on Hosted Service
+  Import and ABI to generate project handlers and mapping functions based on an Ethereum ABI. If address is provided, it
+  will attempt to fetch the ABI and start block from the Etherscan.
+
+ALIASES
+  $ subql import-abi
 ```
 
-_See code: [lib/commands/project/create-project.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/project/create-project.js)_
+_See code: [src/commands/codegen/import-abi.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/codegen/import-abi.ts)_
 
-## `subql project:delete-project`
+## `subql import-abi LOCATION`
 
-Delete Project on Hosted Service
+Import and ABI to generate project handlers and mapping functions based on an Ethereum ABI. If address is provided, it will attempt to fetch the ABI and start block from the Etherscan.
 
 ```
 USAGE
-  $ subql project:delete-project [--org <value>] [--projectName <value>]
+  $ subql import-abi LOCATION [--address <value>] [--abiName <value>] [--startBlock <value>] [--abiPath <value>]
+    [--events <value>] [--functions <value>]
+
+ARGUMENTS
+  LOCATION  The path to the project, this can be a directory or a project manifest file.
 
 FLAGS
-  --org=<value>          Enter organization name
-  --projectName=<value>  Enter project name
+  --abiName=<value>     The contracts name, if not provided, the contract address will be used if the ABI is fetched
+                        from Etherscan
+  --abiPath=<value>     The path to the ABI file
+  --address=<value>     The contracts address
+  --events=<value>      ABI events to generate handlers for. Use '*' for all. e.g. --events="approval, transfer"
+  --functions=<value>   ABI functions to generate handlers for. Use '*' for all. e.g. --functions="approval, transfer"
+  --startBlock=<value>  The start block of the handler, generally the block the contract is deployed.
 
 DESCRIPTION
-  Delete Project on Hosted Service
+  Import and ABI to generate project handlers and mapping functions based on an Ethereum ABI. If address is provided, it
+  will attempt to fetch the ABI and start block from the Etherscan.
+
+ALIASES
+  $ subql import-abi
 ```
 
-_See code: [lib/commands/project/delete-project.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/project/delete-project.js)_
+## `subql init NAME`
 
-## `subql publish`
-
-Upload this SubQuery project to IPFS
+Initialize a SubQuery project from a template
 
 ```
 USAGE
-  $ subql publish [-f <value>] [--ipfs <value>] [-o]
+  $ subql init NAME [--location <value>] [--network <value>] [--networkFamily <value>] [--endpoint
+    <value>] [--installDependencies] [--packageManager npm|yarn|pnpm] [--author <value>]
+
+ARGUMENTS
+  NAME  The name of the project to create
 
 FLAGS
-  -f, --location=<value>  from project folder or specify manifest file
-  -o, --output            Output IPFS CID
-  --ipfs=<value>          IPFS gateway endpoint
+  --author=<value>           The project author that will be set in package.json. Defaults to the current system user
+  --endpoint=<value>         The RPC endpoint that the project will use
+  --installDependencies      Install the dependencies of the project
+  --location=<value>         The path to the project, this can be a directory or a project manifest file.
+  --network=<value>          The name of the network the project will index data for
+  --networkFamily=<value>    The network family the project will index data for, e.g. EVM, Substrate
+  --packageManager=<option>  [default: npm]
+                             <options: npm|yarn|pnpm>
 
 DESCRIPTION
-  Upload this SubQuery project to IPFS
+  Initialize a SubQuery project from a template
 ```
 
-_See code: [lib/commands/publish.js](https://github.com/packages/cli/blob/v4.2.6-0/lib/commands/publish.js)_
+_See code: [src/commands/init.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/init.ts)_
+
+## `subql mcp`
+
+Runs an MCP (Model Context Protocol) server over stdio
+
+```
+USAGE
+  $ subql mcp
+
+DESCRIPTION
+  Runs an MCP (Model Context Protocol) server over stdio
+```
+
+_See code: [src/commands/mcp.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/mcp.ts)_
+
+## `subql migrate`
+
+Migrate a Subgraph project to a SubQuery project, including the manifest and schema.
+
+```
+USAGE
+  $ subql migrate --input <value> --output <value> [--gitSubDirectory <value>]
+
+FLAGS
+  --gitSubDirectory=<value>  A subdirectory in the git repo if the input is a git repo
+  --input=<value>            (required) A directory or git repo to a subgraph project
+  --output=<value>           (required) The location of the SubQuery project
+
+DESCRIPTION
+  Migrate a Subgraph project to a SubQuery project, including the manifest and schema.
+```
+
+_See code: [src/commands/migrate.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/migrate.ts)_
+
+## `subql multi-chain:add [LOCATION]`
+
+Add new chain manifest to multi-chain project
+
+```
+USAGE
+  $ subql multi-chain:add [LOCATION] --chainManifestFile <value>
+
+ARGUMENTS
+  LOCATION  The path to the multichain project, this can be a directory or a multichain manifest file.
+
+FLAGS
+  --chainManifestFile=<value>  (required) The path to the new chain manifest
+
+DESCRIPTION
+  Add new chain manifest to multi-chain project
+```
+
+_See code: [src/commands/multi-chain/add.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/multi-chain/add.ts)_
+
+## `subql network:add-deployment-boost`
+
+Increase the boost for a deployment
+
+```
+USAGE
+  $ subql network:add-deployment-boost --network mainnet|testnet-mumbai|testnet|local --deploymentId <value> --amount
+  <value>
+
+FLAGS
+  --amount=<value>        (required) The amount to boost the deployment with, in SQT
+  --deploymentId=<value>  (required) The deployment id for the project
+  --network=<option>      (required) [default: mainnet] The network to check.
+                          <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  Increase the boost for a deployment
+```
+
+_See code: [src/commands/network/add-deployment-boost.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/add-deployment-boost.ts)_
+
+## `subql network:connect-wallet`
+
+Connect a wallet via Wallet Connect for interacting with the network
+
+```
+USAGE
+  $ subql network:connect-wallet
+
+DESCRIPTION
+  Connect a wallet via Wallet Connect for interacting with the network
+```
+
+_See code: [src/commands/network/connect-wallet.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/connect-wallet.ts)_
+
+## `subql network:create-api-key NAME`
+
+Create an API key for making queries via the SubQuery Network
+
+```
+USAGE
+  $ subql network:create-api-key NAME --network mainnet|testnet-mumbai|testnet|local
+
+ARGUMENTS
+  NAME  The name of the api key, used to identify it
+
+FLAGS
+  --network=<option>  (required) [default: mainnet] The network to check.
+                      <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  Create an API key for making queries via the SubQuery Network
+```
+
+_See code: [src/commands/network/create-api-key.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/create-api-key.ts)_
+
+## `subql network:create-deployment`
+
+Create a new deployment for a SubQuery project
+
+```
+USAGE
+  $ subql network:create-deployment --network mainnet|testnet-mumbai|testnet|local --projectId <value> --deploymentId <value>
+    --deploymentVersion <value> [--deploymentDescription <value>]
+
+FLAGS
+  --deploymentDescription=<value>  A description of the deployment, release notes
+  --deploymentId=<value>           (required) The IPFS CID of the published project
+  --deploymentVersion=<value>      (required) The version of the deployment
+  --network=<option>               (required) [default: mainnet] The network to check.
+                                   <options: mainnet|testnet-mumbai|testnet|local>
+  --projectId=<value>              (required) The project id, this should be a 0x prefixed hex number
+
+DESCRIPTION
+  Create a new deployment for a SubQuery project
+```
+
+_See code: [src/commands/network/create-deployment.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/create-deployment.ts)_
+
+## `subql network:create-flex-plan`
+
+Create a new Flex Plan for querying a SubQuery deployment on the SubQuery Network
+
+```
+USAGE
+  $ subql network:create-flex-plan --network mainnet|testnet-mumbai|testnet|local --deploymentId <value> --amount
+  <value>
+
+FLAGS
+  --amount=<value>        (required) The amount to deposit into the plan, in SQT
+  --deploymentId=<value>  (required) The deploymentId to create a flex plan for
+  --network=<option>      (required) [default: mainnet] The network to check.
+                          <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  Create a new Flex Plan for querying a SubQuery deployment on the SubQuery Network
+```
+
+_See code: [src/commands/network/create-flex-plan.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/create-flex-plan.ts)_
+
+## `subql network:create-project`
+
+Create a new SubQuery project on the SubQuery network
+
+```
+USAGE
+  $ subql network:create-project --network mainnet|testnet-mumbai|testnet|local --deploymentId <value> --projectType
+    0|1|2|3|SUBQUERY|RPC|SQ_DICT|SUBGRAPH --name <value> [--description <value>] [--image <value>] [--tags <value>...]
+    [--website <value>] [--codeRepository <value>] [--deploymentVersion <value>] [--deploymentDescription <value>]
+
+FLAGS
+  --codeRepository=<value>         A URL to the project code repository
+  --deploymentDescription=<value>  A description of the deployment, release notes
+  --deploymentId=<value>           (required) The IPFS CID of the published project
+  --deploymentVersion=<value>      [default: 1.0.0] The version of the deployment
+  --description=<value>            A short description of the project
+  --image=<value>                  A URL to an image for the project
+  --name=<value>                   (required) The name of the project
+  --network=<option>               (required) [default: mainnet] The network to check.
+                                   <options: mainnet|testnet-mumbai|testnet|local>
+  --projectType=<option>           (required)
+                                   <options: 0|1|2|3|SUBQUERY|RPC|SQ_DICT|SUBGRAPH>
+  --tags=<value>...                A list of tags for the project
+  --website=<value>                A URL to the project website
+
+DESCRIPTION
+  Create a new SubQuery project on the SubQuery network
+```
+
+_See code: [src/commands/network/create-project.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/create-project.ts)_
+
+## `subql network:disconnect-wallet`
+
+Disconnect a wallet connected via WalletConnect
+
+```
+USAGE
+  $ subql network:disconnect-wallet
+
+DESCRIPTION
+  Disconnect a wallet connected via WalletConnect
+```
+
+_See code: [src/commands/network/disconnect-wallet.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/disconnect-wallet.ts)_
+
+## `subql network:list-account-boosts`
+
+Get a list of the deployments an account boosts
+
+```
+USAGE
+  $ subql network:list-account-boosts --network mainnet|testnet-mumbai|testnet|local [--address <value>]
+
+FLAGS
+  --address=<value>   The account address to list boosts for
+  --network=<option>  (required) [default: mainnet] The network to check.
+                      <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  Get a list of the deployments an account boosts
+```
+
+_See code: [src/commands/network/list-account-boosts.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/list-account-boosts.ts)_
+
+## `subql network:list-api-keys`
+
+List API keys for making queries via the SubQuery Network
+
+```
+USAGE
+  $ subql network:list-api-keys --network mainnet|testnet-mumbai|testnet|local
+
+FLAGS
+  --network=<option>  (required) [default: mainnet] The network to check.
+                      <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  List API keys for making queries via the SubQuery Network
+```
+
+_See code: [src/commands/network/list-api-keys.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/list-api-keys.ts)_
+
+## `subql network:list-deployment-boosts`
+
+Get a list of boosts made to a project deployment
+
+```
+USAGE
+  $ subql network:list-deployment-boosts --network mainnet|testnet-mumbai|testnet|local --deploymentId <value>
+
+FLAGS
+  --deploymentId=<value>  (required) The deployment id for the project
+  --network=<option>      (required) [default: mainnet] The network to check.
+                          <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  Get a list of boosts made to a project deployment
+```
+
+_See code: [src/commands/network/list-deployment-boosts.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/list-deployment-boosts.ts)_
+
+## `subql network:list-deployment-indexers`
+
+List the indexers for a deployment on the SubQuery Network
+
+```
+USAGE
+  $ subql network:list-deployment-indexers --network mainnet|testnet-mumbai|testnet|local --deploymentId <value>
+
+FLAGS
+  --deploymentId=<value>  (required) The DeploymentID of the project to list deployments for
+  --network=<option>      (required) [default: mainnet] The network to check.
+                          <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  List the indexers for a deployment on the SubQuery Network
+```
+
+_See code: [src/commands/network/list-deployment-indexers.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/list-deployment-indexers.ts)_
+
+## `subql network:list-deployments`
+
+List deployments for a SubQuery project
+
+```
+USAGE
+  $ subql network:list-deployments --network mainnet|testnet-mumbai|testnet|local --projectId <value>
+
+FLAGS
+  --network=<option>   (required) [default: mainnet] The network to check.
+                       <options: mainnet|testnet-mumbai|testnet|local>
+  --projectId=<value>  (required) The ID of the project to list deployments for
+
+DESCRIPTION
+  List deployments for a SubQuery project
+```
+
+_See code: [src/commands/network/list-deployments.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/list-deployments.ts)_
+
+## `subql network:list-flex-plans`
+
+List your Flex Plans for querying projects on the SubQuery Network
+
+```
+USAGE
+  $ subql network:list-flex-plans --network mainnet|testnet-mumbai|testnet|local [--address <value>]
+
+FLAGS
+  --address=<value>   The account address to list boosts for
+  --network=<option>  (required) [default: mainnet] The network to check.
+                      <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  List your Flex Plans for querying projects on the SubQuery Network
+```
+
+_See code: [src/commands/network/list-flex-plans.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/list-flex-plans.ts)_
+
+## `subql network:list-projects`
+
+List projects for a given account on then SubQuery network
+
+```
+USAGE
+  $ subql network:list-projects --network mainnet|testnet-mumbai|testnet|local [--address <value>] [--networkRpc
+  <value>]
+
+FLAGS
+  --address=<value>     The address of the account that owns the projects
+  --network=<option>    (required) [default: mainnet] The network to check.
+                        <options: mainnet|testnet-mumbai|testnet|local>
+  --networkRpc=<value>  Override the network rpc url
+
+DESCRIPTION
+  List projects for a given account on then SubQuery network
+```
+
+_See code: [src/commands/network/list-projects.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/list-projects.ts)_
+
+## `subql network:remove-api-key NAME`
+
+Remove an API key used for making queries via the SubQuery Network
+
+```
+USAGE
+  $ subql network:remove-api-key NAME --network mainnet|testnet-mumbai|testnet|local
+
+ARGUMENTS
+  NAME  The name of the api key, used to identify it
+
+FLAGS
+  --network=<option>  (required) [default: mainnet] The network to check.
+                      <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  Remove an API key used for making queries via the SubQuery Network
+```
+
+_See code: [src/commands/network/remove-api-key.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/remove-api-key.ts)_
+
+## `subql network:remove-deployment-boost`
+
+Decrease the boost amount for a project deployment on the SubQuery network
+
+```
+USAGE
+  $ subql network:remove-deployment-boost --network mainnet|testnet-mumbai|testnet|local --deploymentId <value> --amount
+  <value>
+
+FLAGS
+  --amount=<value>        (required) The amount of boost to remove from the deployment, in SQT
+  --deploymentId=<value>  (required) The deployment id for the project
+  --network=<option>      (required) [default: mainnet] The network to check.
+                          <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  Decrease the boost amount for a project deployment on the SubQuery network
+```
+
+_See code: [src/commands/network/remove-deployment-boost.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/remove-deployment-boost.ts)_
+
+## `subql network:stop-flex-plan`
+
+Stop a Flex Plan for a deployment on the SubQuery Network
+
+```
+USAGE
+  $ subql network:stop-flex-plan --network mainnet|testnet-mumbai|testnet|local --deploymentId <value>
+
+FLAGS
+  --deploymentId=<value>  (required) The deploymentId to create a flex plan for
+  --network=<option>      (required) [default: mainnet] The network to check.
+                          <options: mainnet|testnet-mumbai|testnet|local>
+
+DESCRIPTION
+  Stop a Flex Plan for a deployment on the SubQuery Network
+```
+
+_See code: [src/commands/network/stop-flex-plan.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/stop-flex-plan.ts)_
+
+## `subql network:swap-deployment-boost`
+
+Swap the boost from one deployment to another deployment on the SubQuery Network
+
+```
+USAGE
+  $ subql network:swap-deployment-boost --network mainnet|testnet-mumbai|testnet|local --fromDeploymentId <value> --toDeploymentId
+    <value> --amount <value>
+
+FLAGS
+  --amount=<value>            (required) The amount to boost the deployment with, in SQT
+  --fromDeploymentId=<value>  (required) The deployment id for the project that is already boosted
+  --network=<option>          (required) [default: mainnet] The network to check.
+                              <options: mainnet|testnet-mumbai|testnet|local>
+  --toDeploymentId=<value>    (required) The deployment id for the project to move the boost to
+
+DESCRIPTION
+  Swap the boost from one deployment to another deployment on the SubQuery Network
+```
+
+_See code: [src/commands/network/swap-deployment-boost.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/network/swap-deployment-boost.ts)_
+
+## `subql onfinality:create-deployment`
+
+Create a project deployment on the OnFinality managed services
+
+```
+USAGE
+  $ subql onfinality:create-deployment --org <value> --projectName <value> --type primary|stage --ipfsCID <value>
+    [--indexerVersion <value>] [--queryVersion <value>] [--dict <value>] [--endpoint <value>] [--indexerUnsafe]
+    [--indexerBatchSize <value>] [--indexerSubscription] [--disableHistorical] [--indexerUnfinalized]
+    [--indexerStoreCacheThreshold <value>] [--disableIndexerStoreCacheAsync] [--indexerWorkers <value>] [--queryUnsafe]
+    [--querySubscription] [--queryTimeout <value>] [--queryMaxConnection <value>] [--queryAggregate] [--queryLimit
+    <value>] [--useDefaults]
+
+FLAGS
+  --dict=<value>                        A dictionary endpoint for this projects network
+  --disableHistorical                   Disable historical data indexing
+  --disableIndexerStoreCacheAsync       Disable async store cache
+  --endpoint=<value>                    The RPC endpoint to be used by the project
+  --indexerBatchSize=<value>            [default: 30] The batch size for the indexer
+  --indexerStoreCacheThreshold=<value>  The number of items kept in the cache before flushing
+  --indexerSubscription                 Enable subscription for the indexer
+  --indexerUnfinalized                  Enable unfinalized blocks indexing
+  --indexerUnsafe                       Run the indexer in unsafe mode, this will disable some checks
+  --indexerVersion=<value>              Indexer image version
+  --indexerWorkers=<value>              The number of workers for the indexer
+  --ipfsCID=<value>                     (required) The IPFC CID of the published project
+  --org=<value>                         (required) The Github organization name
+  --projectName=<value>                 (required) Project name
+  --queryAggregate                      Enable aggregate queries
+  --queryLimit=<value>                  The maximum number of results for the query
+  --queryMaxConnection=<value>          The maximum number of connections for the query
+  --querySubscription                   Enable subscription queries
+  --queryTimeout=<value>                The timeout for the query
+  --queryUnsafe                         Run the query in unsafe mode, this will disable some checks
+  --queryVersion=<value>                Query image version
+  --type=<option>                       (required) [default: primary]
+                                        <options: primary|stage>
+  --useDefaults                         Use default values for indexerVersion, queryVersion, dictionary, endpoint
+
+DESCRIPTION
+  Create a project deployment on the OnFinality managed services
+```
+
+_See code: [src/commands/onfinality/create-deployment.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/onfinality/create-deployment.ts)_
+
+## `subql onfinality:create-multichain-deployment [LOCATION]`
+
+Create a multi-chain project deployment no the OnFinality managed services
+
+```
+USAGE
+  $ subql onfinality:create-multichain-deployment [LOCATION] --org <value> --projectName <value> --type primary|stage [--indexerVersion
+    <value>] [--queryVersion <value>] [--dict <value>] [--endpoint <value>] [--indexerUnsafe] [--indexerBatchSize
+    <value>] [--indexerSubscription] [--disableHistorical] [--indexerUnfinalized] [--indexerStoreCacheThreshold <value>]
+    [--disableIndexerStoreCacheAsync] [--indexerWorkers <value>] [--queryUnsafe] [--querySubscription] [--queryTimeout
+    <value>] [--queryMaxConnection <value>] [--queryAggregate] [--queryLimit <value>] [--useDefaults] [--ipfs <value>]
+
+ARGUMENTS
+  LOCATION  The path to the project, this can be a directory or a project manifest file.
+
+FLAGS
+  --dict=<value>                        A dictionary endpoint for this projects network
+  --disableHistorical                   Disable historical data indexing
+  --disableIndexerStoreCacheAsync       Disable async store cache
+  --endpoint=<value>                    The RPC endpoint to be used by the project
+  --indexerBatchSize=<value>            [default: 30] The batch size for the indexer
+  --indexerStoreCacheThreshold=<value>  The number of items kept in the cache before flushing
+  --indexerSubscription                 Enable subscription for the indexer
+  --indexerUnfinalized                  Enable unfinalized blocks indexing
+  --indexerUnsafe                       Run the indexer in unsafe mode, this will disable some checks
+  --indexerVersion=<value>              Indexer image version
+  --indexerWorkers=<value>              The number of workers for the indexer
+  --ipfs=<value>                        An additional IPFS endpoint to upload to
+  --org=<value>                         (required) The Github organization name
+  --projectName=<value>                 (required) Project name
+  --queryAggregate                      Enable aggregate queries
+  --queryLimit=<value>                  The maximum number of results for the query
+  --queryMaxConnection=<value>          The maximum number of connections for the query
+  --querySubscription                   Enable subscription queries
+  --queryTimeout=<value>                The timeout for the query
+  --queryUnsafe                         Run the query in unsafe mode, this will disable some checks
+  --queryVersion=<value>                Query image version
+  --type=<option>                       (required) [default: primary]
+                                        <options: primary|stage>
+  --useDefaults                         Use default values for indexerVersion, queryVersion, dictionary, endpoint
+
+DESCRIPTION
+  Create a multi-chain project deployment no the OnFinality managed services
+```
+
+_See code: [src/commands/onfinality/create-multichain-deployment.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/onfinality/create-multichain-deployment.ts)_
+
+## `subql onfinality:create-project`
+
+Create a project on the OnFinality managed services
+
+```
+USAGE
+  $ subql onfinality:create-project --org <value> --projectName <value> [--logoURL <value>] [--subtitle <value>] [--description
+    <value>] [--dedicatedDB <value>] [--projectType subquery|subgraph]
+
+FLAGS
+  --dedicatedDB=<value>   Dedicated DataBase
+  --description=<value>   Description
+  --logoURL=<value>       Logo URL
+  --org=<value>           (required) Github organization name
+  --projectName=<value>   (required) Project name
+  --projectType=<option>  [default: subquery] Project type [subquery|subgraph]
+                          <options: subquery|subgraph>
+  --subtitle=<value>      Subtitle
+
+DESCRIPTION
+  Create a project on the OnFinality managed services
+```
+
+_See code: [src/commands/onfinality/create-project.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/onfinality/create-project.ts)_
+
+## `subql onfinality:delete-deployment`
+
+Delete a deployment from the OnFinality managed services
+
+```
+USAGE
+  $ subql onfinality:delete-deployment --org <value> --projectName <value> --deploymentID <value>
+
+FLAGS
+  --deploymentID=<value>  (required) Deployment ID
+  --org=<value>           (required) Github organization name
+  --projectName=<value>   (required) Project name
+
+DESCRIPTION
+  Delete a deployment from the OnFinality managed services
+```
+
+_See code: [src/commands/onfinality/delete-deployment.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/onfinality/delete-deployment.ts)_
+
+## `subql onfinality:delete-project`
+
+Delete a project on the OnFinality managed services
+
+```
+USAGE
+  $ subql onfinality:delete-project --org <value> --projectName <value>
+
+FLAGS
+  --org=<value>          (required) The Github organization name
+  --projectName=<value>  (required) The project name
+
+DESCRIPTION
+  Delete a project on the OnFinality managed services
+```
+
+_See code: [src/commands/onfinality/delete-project.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/onfinality/delete-project.ts)_
+
+## `subql onfinality:promote-deployment`
+
+Promote a deployment on the OnFinality managed services from a Stage environment to Production
+
+```
+USAGE
+  $ subql onfinality:promote-deployment --org <value> --projectName <value> --deploymentID <value>
+
+FLAGS
+  --deploymentID=<value>  (required) Deployment ID
+  --org=<value>           (required) Github organization name
+  --projectName=<value>   (required) Project name
+
+DESCRIPTION
+  Promote a deployment on the OnFinality managed services from a Stage environment to Production
+```
+
+_See code: [src/commands/onfinality/promote-deployment.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/onfinality/promote-deployment.ts)_
+
+## `subql publish [LOCATION]`
+
+Upload this SubQuery project to IPFS for distribution
+
+```
+USAGE
+  $ subql publish [LOCATION] [--ipfs <value>] [--silent]
+
+ARGUMENTS
+  LOCATION  The path to the project, this can be a directory or a project manifest file.
+
+FLAGS
+  --ipfs=<value>  An additional IPFS endpoint to upload to
+  --silent        Run the command without logging, only outputs the CIDs
+
+DESCRIPTION
+  Upload this SubQuery project to IPFS for distribution
+```
+
+_See code: [src/commands/publish.ts](https://github.com/subquery/subql/blob/cli/6.6.3-0/packages/cli/src/commands/publish.ts)_
 
 <!-- commandsstop -->

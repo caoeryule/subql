@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import assert from 'node:assert';
@@ -8,11 +8,13 @@ import {INestApplication} from '@nestjs/common';
 import {BaseDataSource, Store, Cache} from '@subql/types-core';
 import {IApiConnectionSpecific} from '../../api.service';
 import {getLogger} from '../../logger';
-import {waitForBatchSize} from '../../utils';
 import {ProcessBlockResponse} from '../blockDispatcher';
 import {ConnectionPoolStateManager} from '../connectionPoolState.manager';
 import {IDynamicDsService} from '../dynamic-ds.service';
+import {MonitorServiceInterface} from '../monitor.service';
+import {Header} from '../types';
 import {IUnfinalizedBlocksService} from '../unfinalizedBlocks.service';
+import {hostMonitorKeys, monitorHostFunctions} from '../worker';
 import {WorkerHost, Worker, AsyncMethods} from './worker.builder';
 import {cacheHostFunctions, HostCache, hostCacheKeys} from './worker.cache.service';
 import {
@@ -27,15 +29,15 @@ import {HostUnfinalizedBlocks, hostUnfinalizedBlocksKeys} from './worker.unfinal
 
 export type DefaultWorkerFunctions<
   ApiConnection /* ApiPromiseConnection*/,
-  DS extends BaseDataSource = BaseDataSource
+  DS extends BaseDataSource = BaseDataSource,
 > = HostCache & HostStore & HostDynamicDS<DS> & HostUnfinalizedBlocks & HostConnectionPoolState<ApiConnection>;
 
 let workerApp: INestApplication;
-let workerService: BaseWorkerService<any, any>;
+let workerService: BaseWorkerService<any, Header>;
 
 const logger = getLogger(`worker #${threadId}`);
 
-export function initWorkerServices(worker: INestApplication, service: BaseWorkerService<any, any>): void {
+export function initWorkerServices(worker: INestApplication, service: typeof workerService): void {
   if (workerApp) {
     logger.warn('Worker already initialised');
     return;
@@ -49,13 +51,9 @@ export function getWorkerApp(): INestApplication {
   return workerApp;
 }
 
-export function getWorkerService<S extends BaseWorkerService<any, any>>(): S {
+export function getWorkerService<S extends typeof workerService>(): S {
   assert(workerService, 'Worker Not initialised');
   return workerService as S;
-}
-// eslint-disable-next-line @typescript-eslint/require-await
-async function getBlocksLoaded(): Promise<number> {
-  return workerService.numFetchedBlocks + workerService.numFetchingBlocks;
 }
 
 // eslint-disable-next-line @typescript-eslint/require-await
@@ -77,7 +75,7 @@ async function getStatus(): Promise<WorkerStatusResponse> {
   };
 }
 
-async function fetchBlock(height: number, specVersion: number): Promise<unknown /*FetchBlockResponse*/> {
+async function fetchBlock(height: number, specVersion: number): ReturnType<(typeof workerService)['fetchBlock']> {
   assert(workerService, 'Worker Not initialised');
   return workerService.fetchBlock(height, {specVersion});
 }
@@ -100,8 +98,10 @@ async function numFetchingBlocks(): Promise<number> {
   return workerService.numFetchingBlocks;
 }
 
-async function waitForWorkerBatchSize(heapSizeInBytes: number): Promise<void> {
-  await waitForBatchSize(heapSizeInBytes);
+// eslint-disable-next-line @typescript-eslint/require-await
+async function abortFetching(): Promise<void> {
+  assert(workerService, 'Worker Not initialised');
+  return workerService.abortFetching();
 }
 
 // Export types to be used on the parent
@@ -111,8 +111,7 @@ type NumFetchedBlocks = typeof numFetchedBlocks;
 type NumFetchingBlocks = typeof numFetchingBlocks;
 type GetWorkerStatus = typeof getStatus;
 type GetMemoryLeft = typeof getMemoryLeft;
-type GetBlocksLoaded = typeof getBlocksLoaded;
-type WaitForWorkerBatchSize = typeof waitForWorkerBatchSize;
+type AbortFetching = typeof abortFetching;
 
 export type IBaseIndexerWorker = {
   processBlock: ProcessBlock;
@@ -121,8 +120,7 @@ export type IBaseIndexerWorker = {
   numFetchingBlocks: NumFetchingBlocks;
   getStatus: GetWorkerStatus;
   getMemoryLeft: GetMemoryLeft;
-  getBlocksLoaded: GetBlocksLoaded;
-  waitForWorkerBatchSize: WaitForWorkerBatchSize;
+  abortFetching: AbortFetching;
 };
 
 export const baseWorkerFunctions: (keyof IBaseIndexerWorker)[] = [
@@ -132,15 +130,14 @@ export const baseWorkerFunctions: (keyof IBaseIndexerWorker)[] = [
   'numFetchingBlocks',
   'getStatus',
   'getMemoryLeft',
-  'getBlocksLoaded',
-  'waitForWorkerBatchSize',
+  'abortFetching',
 ];
 
 export function createWorkerHost<
   T extends AsyncMethods,
   H extends AsyncMethods & {initWorker: (height?: number) => Promise<void>},
   ApiConnection /* ApiPromiseConnection*/,
-  DS extends BaseDataSource = BaseDataSource
+  DS extends BaseDataSource = BaseDataSource,
 >(extraWorkerFns: (keyof T)[], extraHostFns: H): WorkerHost<DefaultWorkerFunctions<ApiConnection, DS> & T> {
   // Register these functions to be exposed to worker host
   return WorkerHost.create<DefaultWorkerFunctions<ApiConnection, DS> & T, IBaseIndexerWorker & H>(
@@ -151,6 +148,7 @@ export function createWorkerHost<
       ...hostCacheKeys,
       ...hostDynamicDsKeys,
       ...hostUnfinalizedBlocksKeys,
+      ...hostMonitorKeys,
       ...hostConnectionPoolStateKeys,
     ],
     {
@@ -162,18 +160,19 @@ export function createWorkerHost<
       numFetchingBlocks,
       getStatus,
       getMemoryLeft,
-      getBlocksLoaded,
-      waitForWorkerBatchSize,
+      abortFetching,
     },
     logger
   );
 }
 
+export type TerminateableWorker<T extends IBaseIndexerWorker> = T & {terminate: () => Promise<number>};
+
 export async function createIndexerWorker<
   T extends IBaseIndexerWorker,
   ApiConnection extends IApiConnectionSpecific<any, any, any> /*ApiPromiseConnection*/ /*ApiPromiseConnection*/,
   B,
-  DS extends BaseDataSource = BaseDataSource
+  DS extends BaseDataSource = BaseDataSource,
 >(
   workerPath: string,
   workerFns: (keyof Omit<T, keyof IBaseIndexerWorker>)[],
@@ -183,8 +182,10 @@ export async function createIndexerWorker<
   unfinalizedBlocksService: IUnfinalizedBlocksService<B>,
   connectionPoolState: ConnectionPoolStateManager<ApiConnection>,
   root: string,
-  startHeight: number
-): Promise<T & {terminate: () => Promise<number>}> {
+  startHeight: number,
+  monitorService?: MonitorServiceInterface,
+  workerData?: any
+): Promise<TerminateableWorker<T>> {
   const indexerWorker = Worker.create<
     T & {initWorker: (startHeight: number) => Promise<void>},
     DefaultWorkerFunctions<ApiConnection, DS>
@@ -194,11 +195,14 @@ export async function createIndexerWorker<
     {
       ...cacheHostFunctions(cache),
       ...storeHostFunctions(store),
+      ...(monitorService ? monitorHostFunctions(monitorService) : {}),
       ...dynamicDsHostFunctions(dynamicDsService),
       unfinalizedBlocksProcess: unfinalizedBlocksService.processUnfinalizedBlockHeader.bind(unfinalizedBlocksService),
       ...connectionPoolStateHostFunctions(connectionPoolState),
     },
-    root
+    root,
+    true,
+    workerData
   );
 
   await indexerWorker.initWorker(startHeight);

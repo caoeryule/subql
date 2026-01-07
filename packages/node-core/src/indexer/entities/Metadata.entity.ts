@@ -1,16 +1,19 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {getMetadataTableName} from '@subql/utils';
 import {BuildOptions, DataTypes, Model, QueryTypes, Sequelize} from '@subql/x-sequelize';
+import {DatasourceParams} from '../dynamic-ds.service';
+import {HistoricalMode} from '../types';
 
 export interface MetadataKeys {
   chain: string;
   genesisHash: string;
   startHeight: number;
-  historicalStateEnabled: boolean;
+  historicalStateEnabled: HistoricalMode;
   indexerNodeVersion: string;
   lastProcessedHeight: number;
+  lastProcessedBlockTimestamp: number; // The unix timestamp of the block in MS
   lastProcessedTimestamp: string;
   processedBlockCount: number;
   blockOffset: number;
@@ -22,12 +25,13 @@ export interface MetadataKeys {
   lastFinalizedVerifiedHeight: number;
   indexerHealthy: boolean;
   targetHeight: number;
-  dynamicDatasources: string;
+  dynamicDatasources: DatasourceParams[];
   unfinalizedBlocks: string;
   schemaMigrationCount: number;
   deployments: string;
   lastCreatedPoiHeight: number;
   latestSyncedPoiHeight: number;
+  dbSize: bigint;
   latestPoiWithMmr: string; // Deprecated, keep for poi migration
   lastPoiHeight: string; // Deprecated, keep for poi migration
 }
@@ -37,10 +41,10 @@ export interface Metadata {
   value: MetadataKeys[keyof MetadataKeys];
 }
 
-export interface MetadataModel extends Model<Metadata>, Metadata {}
+interface MetadataEntity extends Model<Metadata>, Metadata {}
 
 export type MetadataRepo = typeof Model & {
-  new (values?: unknown, options?: BuildOptions): MetadataModel;
+  new (values?: unknown, options?: BuildOptions): MetadataEntity;
 };
 
 async function checkSchemaMetadata(sequelize: Sequelize, schema: string, chainId: string): Promise<boolean> {

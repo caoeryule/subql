@@ -1,12 +1,22 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiPromise } from '@polkadot/api';
-import { RpcMethodResult } from '@polkadot/api/types';
+import {
+  ApiTypes,
+  DecoratedRpcSection,
+  RpcMethodResult,
+} from '@polkadot/api/types';
 import { RuntimeVersion, Header } from '@polkadot/types/interfaces';
-import { AnyFunction, DefinitionRpcExt } from '@polkadot/types/types';
+import {
+  AnyFunction,
+  DefinitionRpcExt,
+  RegisteredTypes,
+} from '@polkadot/types/types';
+import { OverrideBundleDefinition } from '@polkadot/types/types/registry';
 import {
   IndexerEvent,
   getLogger,
@@ -14,7 +24,12 @@ import {
   profilerWrap,
   ConnectionPoolService,
   ApiService as BaseApiService,
+  IBlock,
+  MetadataMismatchError,
+  exitWithError,
 } from '@subql/node-core';
+import { SubstrateNetworkConfig } from '@subql/types';
+import { IEndpointConfig } from '@subql/types-core';
 import { SubstrateNodeConfig } from '../configure/NodeConfig';
 import { SubqueryProject } from '../configure/SubqueryProject';
 import { isOnlyEventHandlers } from '../utils/project';
@@ -32,27 +47,85 @@ const NOT_SUPPORT = (name: string) => () => {
 
 // https://github.com/polkadot-js/api/blob/12750bc83d8d7f01957896a80a7ba948ba3690b7/packages/rpc-provider/src/ws/index.ts#L43
 const MAX_RECONNECT_ATTEMPTS = 5;
-const TIMEOUT = 90 * 1000;
 
 const logger = getLogger('api');
+
+// This is a temp fix for https://github.com/polkadot-js/api/issues/5871
+function overrideConsoleWarn(): void {
+  // Ensure its only run once
+  if ((console as any).oldWarn) {
+    return;
+  }
+  (console as any).oldWarn = console.warn;
+  console.warn = function () {
+    // eslint-disable-next-line prefer-rest-params
+    const args = Array.from(arguments);
+
+    if (
+      args.length > 0 &&
+      args[0].includes('Unable to map [u8; 32] to a lookup index')
+    ) {
+      return;
+    }
+    (console as any).oldWarn.apply(console, args);
+  };
+}
+
+async function dynamicImportHasher(
+  methodName: string,
+): Promise<(data: Uint8Array) => Uint8Array> {
+  const module = await import('@polkadot/util-crypto');
+  const method = module[methodName as keyof typeof module];
+  if (method) {
+    return method as (data: Uint8Array) => Uint8Array;
+  } else {
+    throw new Error(
+      `Hasher Method ${methodName} not found in @polkadot/util-crypto`,
+    );
+  }
+}
+
+async function updateChainTypesHasher(
+  chainTypes: any,
+): Promise<RegisteredTypes | undefined> {
+  if (!chainTypes) {
+    return undefined;
+  }
+  if (chainTypes.hasher && typeof chainTypes.hasher === 'string') {
+    logger.info(`Set overall spec hasher to ${chainTypes.hasher}`);
+    chainTypes.hasher = await dynamicImportHasher(chainTypes.hasher);
+  }
+  const typesBundleSpecs: Record<string, OverrideBundleDefinition> | undefined =
+    chainTypes.typesBundle?.spec;
+  if (typesBundleSpecs) {
+    for (const [key, spec] of Object.entries(typesBundleSpecs)) {
+      if (spec.hasher && typeof spec.hasher === 'string') {
+        logger.info(`Set spec ${key} hasher to ${spec.hasher}`);
+        spec.hasher = await dynamicImportHasher(spec.hasher);
+      }
+    }
+  }
+  return chainTypes;
+}
 
 @Injectable()
 export class ApiService
   extends BaseApiService<
     ApiPromise,
     ApiAt,
-    BlockContent[] | LightBlockContent[]
+    IBlock<BlockContent>[] | IBlock<LightBlockContent>[],
+    ApiPromiseConnection,
+    IEndpointConfig
   >
-  implements OnApplicationShutdown
-{
-  private fetchBlocksFunction: FetchFunc;
+  implements OnApplicationShutdown {
+  private _fetchBlocksFunction?: FetchFunc;
   private fetchBlocksBatches: GetFetchFunc = () => this.fetchBlocksFunction;
-  private currentBlockHash: string;
-  private currentBlockNumber: number;
+  private _currentBlockHash?: string;
+  private _currentBlockNumber?: number;
 
   private nodeConfig: SubstrateNodeConfig;
 
-  constructor(
+  private constructor(
     @Inject('ISubqueryProject') private project: SubqueryProject,
     connectionPoolService: ConnectionPoolService<ApiPromiseConnection>,
     eventEmitter: EventEmitter2,
@@ -64,53 +137,90 @@ export class ApiService
     this.updateBlockFetching();
   }
 
+  private get fetchBlocksFunction(): FetchFunc {
+    assert(this._fetchBlocksFunction, 'fetchBlocksFunction not initialized');
+    return this._fetchBlocksFunction;
+  }
+
+  private get currentBlockHash(): string {
+    assert(this._currentBlockHash, 'currentBlockHash not initialized');
+    return this._currentBlockHash;
+  }
+
+  private set currentBlockHash(value: string) {
+    this._currentBlockHash = value;
+  }
+
+  private get currentBlockNumber(): number {
+    assert(this._currentBlockNumber, 'currentBlockNumber not initialized');
+    return this._currentBlockNumber;
+  }
+
+  private set currentBlockNumber(value: number) {
+    this._currentBlockNumber = value;
+  }
+
   async onApplicationShutdown(): Promise<void> {
     await this.connectionPoolService.onApplicationShutdown();
   }
 
-  async init(): Promise<ApiService> {
-    let chainTypes, network;
-    try {
-      chainTypes = this.project.chainTypes;
-      network = this.project.network;
+  static async init(
+    project: SubqueryProject,
+    connectionPoolService: ConnectionPoolService<ApiPromiseConnection>,
+    eventEmitter: EventEmitter2,
+    nodeConfig: NodeConfig,
+  ): Promise<ApiService> {
+    const apiService = new ApiService(
+      project,
+      connectionPoolService,
+      eventEmitter,
+      nodeConfig,
+    );
 
-      if (this.nodeConfig.primaryNetworkEndpoint) {
-        network.endpoint.push(this.nodeConfig.primaryNetworkEndpoint);
+    overrideConsoleWarn();
+    let chainTypes: RegisteredTypes | undefined;
+    let network: SubstrateNetworkConfig;
+    try {
+      chainTypes = await updateChainTypesHasher(project.chainTypes);
+      network = project.network;
+
+      if (apiService.nodeConfig.primaryNetworkEndpoint) {
+        const [endpoint, config] = apiService.nodeConfig.primaryNetworkEndpoint;
+        (network.endpoint as Record<string, IEndpointConfig>)[endpoint] =
+          config;
       }
     } catch (e) {
-      logger.error(e);
-      process.exit(1);
+      exitWithError(new Error(`Failed to init api`, { cause: e }), logger);
     }
 
     if (chainTypes) {
       logger.info('Using provided chain types');
     }
 
-    await this.createConnections(
+    await apiService.createConnections(
       network,
       //createConnection
-      (endpoint) =>
-        ApiPromiseConnection.create(endpoint, this.fetchBlocksBatches, {
-          chainTypes,
-        }),
-      //getChainId
-      //eslint-disable-next-line @typescript-eslint/require-await
-      async (connection: ApiPromiseConnection) => {
-        const api = connection.unsafeApi;
-        return api.genesisHash.toString();
-      },
+      (endpoint, config) =>
+        ApiPromiseConnection.create(
+          endpoint,
+          apiService.fetchBlocksBatches,
+          {
+            chainTypes,
+          },
+          config,
+        ),
       //postConnectedHook
       (connection: ApiPromiseConnection, endpoint: string, index: number) => {
         const api = connection.unsafeApi;
         api.on('connected', () => {
-          this.eventEmitter.emit(IndexerEvent.ApiConnected, {
+          eventEmitter.emit(IndexerEvent.ApiConnected, {
             value: 1,
             apiIndex: index,
             endpoint: endpoint,
           });
         });
         api.on('disconnected', () => {
-          this.eventEmitter.emit(IndexerEvent.ApiConnected, {
+          eventEmitter.emit(IndexerEvent.ApiConnected, {
             value: 0,
             apiIndex: index,
             endpoint: endpoint,
@@ -118,8 +228,12 @@ export class ApiService
         });
       },
     );
+    return apiService;
+  }
 
-    return this;
+  async updateChainTypes(): Promise<void> {
+    const chainTypes = await updateChainTypesHasher(this.project.chainTypes);
+    await this.connectionPoolService.updateChainTypes(chainTypes);
   }
 
   updateBlockFetching(): void {
@@ -152,13 +266,13 @@ export class ApiService
       : SubstrateUtil.fetchBlocksBatches;
 
     if (this.nodeConfig?.profiler) {
-      this.fetchBlocksFunction = profilerWrap(
+      this._fetchBlocksFunction = profilerWrap(
         fetchFunc,
         'SubstrateUtil',
         'fetchBlocksBatches',
       );
     } else {
-      this.fetchBlocksFunction = fetchFunc;
+      this._fetchBlocksFunction = fetchFunc;
     }
   }
 
@@ -168,10 +282,10 @@ export class ApiService
 
   async getPatchedApi(
     header: Header,
-    runtimeVersion: RuntimeVersion,
+    runtimeVersion?: RuntimeVersion,
   ): Promise<ApiAt> {
-    this.currentBlockHash = header.hash.toString();
-    this.currentBlockNumber = header.number.toNumber();
+    this._currentBlockHash = header.hash.toString();
+    this._currentBlockNumber = header.number.toNumber();
 
     const api = this.api;
     const apiAt = (await api.at(
@@ -182,7 +296,7 @@ export class ApiService
     return apiAt;
   }
 
-  private redecorateRpcFunction<T extends 'promise' | 'rxjs'>(
+  private redecorateRpcFunction<T extends ApiTypes>(
     original: RpcMethodResult<T, AnyFunction>,
   ): RpcMethodResult<T, AnyFunction> {
     const methodName = this.getRPCFunctionName(original);
@@ -240,19 +354,27 @@ export class ApiService
     return ret;
   }
 
-  private patchApiRpc(api: ApiPromise, apiAt: ApiAt): void {
-    apiAt.rpc = Object.entries(api.rpc).reduce((acc, [module, rpcMethods]) => {
-      acc[module] = Object.entries(rpcMethods).reduce(
-        (accInner, [name, rpcPromiseResult]) => {
-          accInner[name] = this.redecorateRpcFunction(
-            rpcPromiseResult as RpcMethodResult<any, AnyFunction>,
-          );
-          return accInner;
-        },
-        {},
-      );
-      return acc;
-    }, {} as ApiPromise['rpc']);
+  private patchApiRpc<T extends ApiTypes = 'promise'>(
+    api: ApiPromise,
+    apiAt: ApiAt,
+  ): void {
+    apiAt.rpc = Object.entries(api.rpc).reduce(
+      (acc, [module, rpcMethods]) => {
+        acc[module as keyof ApiPromise['rpc']] = Object.entries(
+          rpcMethods,
+        ).reduce(
+          (accInner, [name, rpcPromiseResult]) => {
+            accInner[name] = this.redecorateRpcFunction<T>(
+              rpcPromiseResult as RpcMethodResult<T, AnyFunction>,
+            );
+            return accInner;
+          },
+          {} as DecoratedRpcSection<T, any>,
+        ) as any;
+        return acc;
+      },
+      {} as ApiPromise['rpc'],
+    );
   }
 
   private getRPCFunctionName<T extends 'promise' | 'rxjs'>(
@@ -263,27 +385,30 @@ export class ApiService
     return `api.rpc.${ext?.section ?? '*'}.${ext?.method ?? '*'}`;
   }
 
+  // Overrides the super function because of the specVer
   async fetchBlocks(
     heights: number[],
     overallSpecVer?: number,
     numAttempts = MAX_RECONNECT_ATTEMPTS,
-  ): Promise<LightBlockContent[]> {
-    let reconnectAttempts = 0;
-    while (reconnectAttempts < numAttempts) {
-      try {
-        const apiInstance = this.connectionPoolService.api;
-        return await apiInstance.fetchBlocks(heights, overallSpecVer);
-      } catch (e: any) {
-        logger.error(
-          e,
-          `Failed to fetch blocks ${heights[0]}...${
-            heights[heights.length - 1]
-          }`,
-        );
+  ): Promise<IBlock<LightBlockContent>[] | IBlock<BlockContent>[]> {
+    return this.retryFetch(async () => {
+      // Get the latest fetch function from the provider
+      const apiInstance = this.connectionPoolService.api;
+      return apiInstance.fetchBlocks(heights, overallSpecVer);
+    }, numAttempts);
+  }
 
-        reconnectAttempts++;
-      }
+  // Polkadot uses genesis hash instead of chainId
+  protected assertChainId(
+    network: { chainId: string },
+    connection: ApiPromiseConnection,
+  ): void {
+    if (network.chainId !== connection.networkMeta.genesisHash) {
+      throw new MetadataMismatchError(
+        'ChainId',
+        network.chainId,
+        connection.networkMeta.genesisHash,
+      );
     }
-    throw new Error(`Maximum number of retries (${numAttempts}) reached.`);
   }
 }

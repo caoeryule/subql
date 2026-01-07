@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import {IProjectNetworkConfig} from '../../types';
@@ -123,10 +123,18 @@ export interface NodeOptions {
 export interface ParentProject {
   /**
    * The block height at which to switch from the parent project to this project.
+   * @deprecated Please use `untilBlock` instead
    * @type {number}
    * @description The block height to switch from the parent project to this project.
    */
   block: number;
+
+  /**
+   * The block height at which to switch from the parent project to this project.
+   * @type {number}
+   * @description The block height to switch from the parent project to this project.
+   */
+  untilBlock: number;
 
   /**
    * The IPFS CID (Content Identifier) referencing the parent project.
@@ -139,7 +147,7 @@ export interface ParentProject {
 export interface ProjectManifestV1_0_0<
   D extends BaseDataSource = BaseDataSource,
   T extends BaseTemplateDataSource<D> = BaseTemplateDataSource<D>,
-  C extends IProjectNetworkConfig = IProjectNetworkConfig
+  C extends IProjectNetworkConfig = IProjectNetworkConfig,
 > {
   name?: string;
   version: string;

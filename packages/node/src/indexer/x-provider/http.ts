@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 // overwrite the official Polkadot HttpProvider: https://github.com/polkadot-js/api/blob/master/packages/rpc-provider/src/http/index.ts
@@ -18,13 +18,6 @@ import type {
 import { getLogger } from '@subql/node-core';
 import { context } from 'fetch-h2';
 
-const ctx = context({
-  http1: {
-    keepAlive: true,
-    maxSockets: 10,
-  },
-});
-
 const ERROR_SUBSCRIBE =
   'HTTP Provider does not have subscriptions, use WebSockets instead';
 
@@ -35,7 +28,7 @@ const l = getLogger('http-provider');
  *
  * @name HttpProvider
  *
- * @description The HTTP Provider allows sending requests using HTTP to a HTTP RPC server TCP port. It does not support subscriptions so you won't be able to listen to events such as new blocks or balance changes. It is usually preferable using the [[WsProvider]].
+ * @description The HTTP Provider allows sending requests using HTTP to an HTTP RPC server TCP port. It does not support subscriptions so you won't be able to listen to events such as new blocks or balance changes. It is usually preferable using the [[WsProvider]].
  *
  * @example
  * <BR>
@@ -61,6 +54,8 @@ export class HttpProvider implements ProviderInterface {
 
   readonly #stats: ProviderStats;
 
+  readonly #ctx: ReturnType<typeof context>;
+
   /**
    * @param {string} endpoint The endpoint url starting with http://
    */
@@ -73,6 +68,13 @@ export class HttpProvider implements ProviderInterface {
         `Endpoint should start with 'http://' or 'https://', received '${endpoint}'`,
       );
     }
+
+    this.#ctx = context({
+      http1: {
+        keepAlive: true,
+        maxSockets: 10,
+      },
+    });
 
     this.#coder = new RpcCoder();
     this.#endpoint = endpoint;
@@ -117,6 +119,7 @@ export class HttpProvider implements ProviderInterface {
    */
   async disconnect(): Promise<void> {
     // noop
+    await this.#ctx.disconnectAll();
   }
 
   /**
@@ -190,7 +193,7 @@ export class HttpProvider implements ProviderInterface {
     this.#stats.total.bytesSent += body.length;
 
     try {
-      const response = await ctx.fetch(this.#endpoint, {
+      const response = await this.#ctx.fetch(this.#endpoint, {
         body,
         headers: {
           Accept: 'application/json',

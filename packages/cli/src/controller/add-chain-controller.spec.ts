@@ -1,14 +1,13 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import fs, {existsSync} from 'fs';
 import os from 'os';
 import path from 'path';
-import {promisify} from 'util';
 import {DEFAULT_MULTICHAIN_MANIFEST} from '@subql/common';
 import {MultichainProjectManifest, ProjectManifestV1_0_0} from '@subql/types-core';
 import * as yaml from 'js-yaml';
-import rimraf from 'rimraf';
+import {rimraf} from 'rimraf';
 import {YAMLSeq} from 'yaml';
 import {loadMultichainManifest, validateAndAddChainManifest} from './add-chain-controller';
 
@@ -43,7 +42,7 @@ const childChainManifest_1: ProjectManifestV1_0_0 = {
   schema: {
     file: './schema.graphql',
   },
-  dataSources: null,
+  dataSources: [],
 };
 
 const childChainManifest_2: ProjectManifestV1_0_0 = {
@@ -68,7 +67,7 @@ const childChainManifest_2: ProjectManifestV1_0_0 = {
   schema: {
     file: './schema.graphql',
   },
-  dataSources: null,
+  dataSources: [],
 };
 
 const childChainManifest_2_wrongSchema: ProjectManifestV1_0_0 = {
@@ -93,7 +92,7 @@ const childChainManifest_2_wrongSchema: ProjectManifestV1_0_0 = {
   schema: {
     file: './schema_wrong.graphql',
   },
-  dataSources: null,
+  dataSources: [],
 };
 
 async function createMultichainProject(
@@ -135,7 +134,7 @@ describe('MultiChain - ADD', () => {
 
   afterEach(async () => {
     try {
-      await promisify(rimraf)(projectDir);
+      await rimraf(projectDir);
     } catch (e) {
       console.warn('Failed to clean up tmp dir after test', e);
     }

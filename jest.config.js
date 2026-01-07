@@ -168,12 +168,14 @@ module.exports = {
   // ],
 
   // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped
-  // testPathIgnorePatterns: [
-  //   "/node_modules/"
-  // ],
+  testPathIgnorePatterns: [
+    '.*\\.fixtures\\.ts$',
+    'packages/cli/test/build/src/test/mappingHandler.test.ts',
+    '/node_modules/',
+  ],
 
   // The regexp pattern or array of patterns that Jest uses to detect test files
-  testRegex: '.*\\.spec\\.ts$',
+  testRegex: '.*\\.(spec)\\.ts$',
 
   // This option allows the use of a custom results processor
   // testResultsProcessor: undefined,
@@ -192,10 +194,9 @@ module.exports = {
     '^.+\\.(ts|tsx)?$': [
       'ts-jest',
       {
-        tsconfig: 'tsconfig.test.json'
-      }
+        tsconfig: 'tsconfig.test.json',
+      },
     ],
-    '^.+\\.(js|jsx)$': 'babel-jest',
   },
 
   // An array of regexp pattern strings that are matched against all source file paths, matched files will skip transformation
@@ -204,9 +205,7 @@ module.exports = {
   //   "\\.pnp\\.[^\\/]+$"
   // ],
 
-  "transformIgnorePatterns": [
-    "node_modules/(?!(@polkadot|@babel/runtime/helpers/esm)/)"
-  ],
+  transformIgnorePatterns: ['node_modules/(?!(@polkadot)/)'],
 
   // An array of regexp pattern strings that are matched against all modules before the module loader will automatically return a mock for them
   // unmockedModulePathPatterns: undefined,

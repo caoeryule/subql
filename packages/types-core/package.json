@@ -1,6 +1,6 @@
 {
   "name": "@subql/types-core",
-  "version": "0.4.0",
+  "version": "2.2.0",
   "description": "",
   "homepage": "https://github.com/subquery/subql",
   "repository": "github:subquery/subql",
@@ -13,9 +13,20 @@
   "main": "dist/index.js",
   "license": "GPL-3.0",
   "files": [
-    "/dist"
+    "/dist",
+    "!/dist/**/*.spec.js",
+    "!/dist/**/*.spec.d.ts",
+    "!/dist/**/*.spec.js.map",
+    "!/dist/**/*.test.js",
+    "!/dist/**/*.test.d.ts",
+    "!/dist/**/*.test.js.map",
+    "package.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "dependencies": {
-    "package-json-type": "^1.0.3"
+    "package-json-type": "^1.0.3",
+    "pino": "^6.13.3"
   }
 }

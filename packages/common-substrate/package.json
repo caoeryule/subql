@@ -1,6 +1,6 @@
 {
   "name": "@subql/common-substrate",
-  "version": "3.2.1",
+  "version": "4.5.5",
   "description": "",
   "scripts": {
     "build": "rm -rf dist && tsc -b",
@@ -14,18 +14,24 @@
   "main": "dist/index.js",
   "license": "GPL-3.0",
   "dependencies": {
-    "@subql/common": "workspace:*",
-    "@subql/types": "workspace:*",
-    "js-yaml": "^4.1.0",
-    "reflect-metadata": "^0.1.13"
+    "@subql/common": "workspace:~",
+    "@subql/types": "workspace:~"
   },
   "peerDependencies": {
-    "class-transformer": "*",
-    "class-validator": "*"
+    "class-transformer": "^0.5.1",
+    "class-validator": "0.14.1"
   },
-  "devDependencies": {
-    "@types/bn.js": "4.11.6",
-    "@types/js-yaml": "^4.0.4",
-    "@types/pino": "^6.3.12"
-  }
+  "files": [
+    "/dist",
+    "!/dist/**/*.spec.js",
+    "!/dist/**/*.spec.d.ts",
+    "!/dist/**/*.spec.js.map",
+    "!/dist/**/*.test.js",
+    "!/dist/**/*.test.d.ts",
+    "!/dist/**/*.test.js.map",
+    "package.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
 }

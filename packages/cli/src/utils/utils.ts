@@ -1,18 +1,28 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import fs, {existsSync, readFileSync} from 'fs';
 import os from 'os';
 import path from 'path';
-import {promisify} from 'util';
-import {DEFAULT_MANIFEST, DEFAULT_TS_MANIFEST} from '@subql/common';
-import {SubqlRuntimeHandler} from '@subql/common-ethereum';
+import {input} from '@inquirer/prompts';
+import {
+  DEFAULT_ENV,
+  DEFAULT_ENV_DEVELOP,
+  DEFAULT_ENV_DEVELOP_LOCAL,
+  DEFAULT_ENV_LOCAL,
+  DEFAULT_GIT_IGNORE,
+  DEFAULT_MANIFEST,
+  DEFAULT_MULTICHAIN_MANIFEST,
+  DEFAULT_TS_MANIFEST,
+} from '@subql/common';
+import {MultichainProjectManifest} from '@subql/types-core';
 import axios from 'axios';
-import cli, {ux} from 'cli-ux';
 import ejs from 'ejs';
-import inquirer, {Inquirer} from 'inquirer';
+import * as yaml from 'js-yaml';
 import JSON5 from 'json5';
-import rimraf from 'rimraf';
+import {rimraf} from 'rimraf';
+import {ACCESS_TOKEN_PATH} from '../constants';
 
 export async function delay(sec: number): Promise<void> {
   return new Promise((resolve) => {
@@ -20,82 +30,96 @@ export async function delay(sec: number): Promise<void> {
   });
 }
 
-export async function valueOrPrompt<T>(value: T, msg: string, error: string): Promise<T> {
+export async function valueOrPrompt(
+  value: string | undefined,
+  msg: string,
+  error: string
+): Promise<NonNullable<string>> {
   if (value) return value;
   try {
-    return await cli.prompt(msg);
+    return await input({
+      message: msg,
+      required: true,
+    });
   } catch (e) {
     throw new Error(error);
   }
 }
 
-export function addV(str: string | undefined) {
-  if (str && !str.includes('v')) {
-    return `v${str}`;
+export function addV<T extends string | undefined>(str: T): T {
+  // replaced includes to first byte.
+  if (str && str[0] !== 'v') {
+    return `v${str}` as T;
   }
   return str;
 }
 
-export async function promptWithDefaultValues(
-  promptType: Inquirer | typeof ux,
-  msg: string,
-  defaultValue?: string,
-  choices?: string[],
-  required?: boolean
-): Promise<string> {
-  const promptValue =
-    promptType === inquirer
-      ? (
-          await promptType.prompt({
-            name: 'runnerVersions',
-            message: msg,
-            type: 'list',
-            choices: choices,
-          })
-        ).runnerVersions
-      : await promptType.prompt(msg, {default: defaultValue, required: required});
-  return promptValue;
-}
+export async function checkToken(token_path: string = ACCESS_TOKEN_PATH): Promise<string> {
+  const reqInput = () => input({message: 'Token cannot be found, Enter token', required: true});
 
-export async function checkToken(authToken_ENV: string, token_path: string): Promise<string> {
-  let authToken = authToken_ENV;
-  if (authToken_ENV) return authToken_ENV;
+  const envToken = process.env.SUBQL_ACCESS_TOKEN;
+  if (envToken) return envToken;
   if (existsSync(token_path)) {
     try {
-      authToken = process.env.SUBQL_ACCESS_TOKEN ?? readFileSync(token_path, 'utf8');
+      const authToken = readFileSync(token_path, 'utf8');
+      if (!authToken) {
+        return await reqInput();
+      }
+      return authToken.trim();
     } catch (e) {
-      return (authToken = await cli.prompt('Token cannot be found, Enter token'));
+      return reqInput();
     }
   } else {
-    authToken = await cli.prompt('Token cannot be found, Enter token');
-    return authToken;
+    return reqInput();
   }
+}
+
+export function getOptionalToken(token_path: string = ACCESS_TOKEN_PATH): string | undefined {
+  const envToken = process.env.SUBQL_ACCESS_TOKEN;
+  if (envToken) return envToken;
+  if (existsSync(token_path)) {
+    try {
+      const authToken = readFileSync(token_path, 'utf8');
+      if (!authToken) {
+        return undefined;
+      }
+      return authToken.trim();
+    } catch (e) {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 export function errorHandle(e: any, msg: string): Error {
-  if ((axios.isAxiosError(e) as any) && e?.response?.data) {
-    throw new Error(`${msg} ${e.response.data.message ?? e.response.data}`);
+  if (axios.isAxiosError(e) && e?.response?.data) {
+    return new Error(`${msg} ${e.response.data.message ?? e.response.data}`);
   }
 
-  throw new Error(`${msg} ${e.message}`);
+  return new Error(`${msg} ${e.message}`);
 }
 
 export function buildProjectKey(org: string, projectName: string): string {
-  return encodeURIComponent(`${org}/${projectName}`);
+  return encodeURIComponent(`${org}/${projectName.toLowerCase()}`);
 }
 
 export async function renderTemplate(templatePath: string, outputPath: string, templateData: ejs.Data): Promise<void> {
   const data = await ejs.renderFile(templatePath, templateData);
+  // Ensure the output directory exists
+  const outputDir = path.dirname(outputPath);
+  if (!fs.existsSync(outputDir)) {
+    await fs.promises.mkdir(outputDir, {recursive: true});
+  }
   await fs.promises.writeFile(outputPath, data);
 }
 
 export async function prepareDirPath(path: string, recreate: boolean): Promise<void> {
   try {
-    await promisify(rimraf)(path);
+    await rimraf(path);
     if (recreate) {
       await fs.promises.mkdir(path, {recursive: true});
     }
-  } catch (e) {
+  } catch (e: any) {
     throw new Error(`Failed to prepare ${path}: ${e.message}`);
   }
 }
@@ -125,7 +149,7 @@ export function findMatchingIndices(
   //  This regex would work in engines that support recursion, such as PCRE (Perl-Compatible Regular Expressions).
 
   let openCount = 0;
-  let startIndex: number;
+  let startIndex: number | undefined;
   const pairs: [number, number][] = [];
 
   for (let i = startFrom; i < content.length; i++) {
@@ -135,6 +159,7 @@ export function findMatchingIndices(
     } else if (content[i] === endChar) {
       openCount--;
       if (openCount === 0) {
+        assert(startIndex !== undefined, 'startIndex should be defined');
         pairs.push([startIndex, i]);
         break;
       }
@@ -162,34 +187,6 @@ export function extractArrayValueFromTsManifest(content: string, key: string): s
   return content.slice(startIndex, endIndex + 1);
 }
 
-export function tsStringify(
-  obj: SubqlRuntimeHandler | SubqlRuntimeHandler[] | string,
-  indent = 2,
-  currentIndent = 0
-): string {
-  if (typeof obj !== 'object' || obj === null) {
-    if (typeof obj === 'string' && obj.includes('EthereumHandlerKind')) {
-      return obj; // Return the string as-is without quotes
-    }
-    return JSON.stringify(obj);
-  }
-
-  if (Array.isArray(obj)) {
-    const items = obj.map((item) => tsStringify(item, indent, currentIndent + indent));
-    return `[\n${items.map((item) => ' '.repeat(currentIndent + indent) + item).join(',\n')}\n${' '.repeat(
-      currentIndent
-    )}]`;
-  }
-
-  const entries = Object.entries(obj);
-  const result = entries.map(([key, value]) => {
-    const valueStr = tsStringify(value, indent, currentIndent + indent);
-    return `${' '.repeat(currentIndent + indent)}${key}: ${valueStr}`;
-  });
-
-  return `{\n${result.join(',\n')}\n${' '.repeat(currentIndent)}}`;
-}
-
 export function extractFromTs(
   manifest: string,
   patterns: {[key: string]: RegExp | undefined}
@@ -201,7 +198,9 @@ export function extractFromTs(
   const nestArr = ['dataSources', 'handlers'];
   for (const key in patterns) {
     if (!nestArr.includes(key)) {
-      const match = manifest.match(patterns[key]);
+      const regExp = patterns[key];
+      assert(regExp, `Pattern for ${key} is not defined`);
+      const match = manifest.match(regExp);
 
       if (arrKeys.includes(key) && match) {
         const inputStr = match[1].replace(/`/g, '"');
@@ -251,4 +250,78 @@ export function defaultYamlManifestPath(projectPath: string): string {
 
 export function defaultTSManifestPath(projectPath: string): string {
   return path.join(projectPath, DEFAULT_TS_MANIFEST);
+}
+
+export function defaultEnvPath(projectPath: string): string {
+  return path.join(projectPath, DEFAULT_ENV);
+}
+
+export function defaultEnvDevelopPath(projectPath: string): string {
+  return path.join(projectPath, DEFAULT_ENV_DEVELOP);
+}
+
+export function defaultEnvLocalPath(projectPath: string): string {
+  return path.join(projectPath, DEFAULT_ENV_LOCAL);
+}
+
+export function defaultEnvDevelopLocalPath(projectPath: string): string {
+  return path.join(projectPath, DEFAULT_ENV_DEVELOP_LOCAL);
+}
+
+export function defaultGitIgnorePath(projectPath: string): string {
+  return path.join(projectPath, DEFAULT_GIT_IGNORE);
+}
+
+export function copyFolderSync(source: string, target: string): void {
+  if (!fs.existsSync(target)) {
+    fs.mkdirSync(target, {recursive: true});
+  }
+
+  fs.readdirSync(source).forEach((item) => {
+    const sourcePath = path.join(source, item);
+    const targetPath = path.join(target, item);
+
+    if (fs.lstatSync(sourcePath).isDirectory()) {
+      copyFolderSync(sourcePath, targetPath);
+    } else {
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+  });
+}
+
+export function defaultMultiChainYamlManifestPath(projectPath: string): string {
+  return path.join(projectPath, DEFAULT_MULTICHAIN_MANIFEST);
+}
+
+export function isMultichain(location: string): boolean {
+  const multichainContent = yaml.load(readFileSync(location, 'utf8')) as MultichainProjectManifest;
+  return !!multichainContent && !!multichainContent.projects;
+}
+
+export async function resultToBuffer(req: AsyncIterable<Uint8Array>): Promise<string> {
+  const scriptBufferArray: Uint8Array[] = [];
+  for await (const res of req) {
+    scriptBufferArray.push(res);
+  }
+  return Buffer.concat(scriptBufferArray.map((u8a) => Buffer.from(u8a))).toString('utf8');
+}
+
+/**
+ *
+ * @param req The ipfs response
+ * @param maybe if true any errors will result in undefined being returned
+ * @returns
+ */
+export async function resultToJson<T, B extends boolean>(
+  req: AsyncIterable<Uint8Array>,
+  maybe: B
+): Promise<B extends true ? T | undefined : T> {
+  try {
+    const str = await resultToBuffer(req);
+
+    return JSON.parse(str);
+  } catch (e) {
+    if (maybe) return undefined as B extends true ? T | undefined : T;
+    throw e;
+  }
 }

@@ -1,17 +1,88 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import fs from 'fs';
 import path from 'path';
-import {Inject} from '@nestjs/common';
-import {BaseCustomDataSource, BaseDataSource, DsProcessor, IProjectNetworkConfig} from '@subql/types-core';
+import {Inject, Injectable} from '@nestjs/common';
+import {
+  BaseCustomDataSource,
+  SecondLayerHandlerProcessor_0_0_0,
+  SecondLayerHandlerProcessor_1_0_0,
+  BaseDataSource,
+  DsProcessor,
+  IProjectNetworkConfig,
+} from '@subql/types-core';
 import {VMScript} from 'vm2';
+import {IBlockchainService} from '../blockchain.service';
 import {NodeConfig} from '../configure';
 import {getLogger} from '../logger';
 import {Sandbox, SandboxOption} from './sandbox';
 import {ISubqueryProject} from './types';
 
 const logger = getLogger('ds-sandbox');
+
+function isSecondLayerHandlerProcessor_0_0_0<
+  InputKinds extends string | symbol,
+  HandlerInput extends Record<InputKinds, any>,
+  BaseHandlerFilters extends Record<InputKinds, any>,
+  F extends Record<string, unknown>,
+  E,
+  API,
+  DS extends BaseCustomDataSource = BaseCustomDataSource,
+>(
+  processor:
+    | SecondLayerHandlerProcessor_0_0_0<InputKinds, HandlerInput, BaseHandlerFilters, F, E, DS, API>
+    | SecondLayerHandlerProcessor_1_0_0<InputKinds, HandlerInput, BaseHandlerFilters, F, E, DS, API>
+): processor is SecondLayerHandlerProcessor_0_0_0<InputKinds, HandlerInput, BaseHandlerFilters, F, E, DS, API> {
+  // Existing datasource processors had no concept of specVersion, therefore undefined is equivalent to 0.0.0
+  return processor.specVersion === undefined;
+}
+
+function isSecondLayerHandlerProcessor_1_0_0<
+  InputKinds extends string | symbol,
+  HandlerInput extends Record<InputKinds, any>,
+  BaseHandlerFilters extends Record<InputKinds, any>,
+  F extends Record<string, unknown>,
+  E,
+  API,
+  DS extends BaseCustomDataSource = BaseCustomDataSource,
+>(
+  processor:
+    | SecondLayerHandlerProcessor_0_0_0<InputKinds, HandlerInput, BaseHandlerFilters, F, E, DS, API>
+    | SecondLayerHandlerProcessor_1_0_0<InputKinds, HandlerInput, BaseHandlerFilters, F, E, DS, API>
+): processor is SecondLayerHandlerProcessor_1_0_0<InputKinds, HandlerInput, BaseHandlerFilters, F, E, DS, API> {
+  return processor.specVersion === '1.0.0';
+}
+
+export function asSecondLayerHandlerProcessor_1_0_0<
+  InputKinds extends string | symbol,
+  HandlerInput extends Record<InputKinds, any>,
+  BaseHandlerFilters extends Record<InputKinds, any>,
+  F extends Record<string, unknown>,
+  E,
+  API,
+  DS extends BaseCustomDataSource = BaseCustomDataSource,
+>(
+  processor:
+    | SecondLayerHandlerProcessor_0_0_0<InputKinds, HandlerInput, BaseHandlerFilters, F, E, DS, API>
+    | SecondLayerHandlerProcessor_1_0_0<InputKinds, HandlerInput, BaseHandlerFilters, F, E, DS, API>
+): SecondLayerHandlerProcessor_1_0_0<InputKinds, HandlerInput, BaseHandlerFilters, F, E, DS, API> {
+  if (isSecondLayerHandlerProcessor_1_0_0(processor)) {
+    return processor;
+  }
+
+  if (!isSecondLayerHandlerProcessor_0_0_0(processor)) {
+    throw new Error('Unsupported ds processor version');
+  }
+
+  return {
+    ...processor,
+    specVersion: '1.0.0',
+    filterProcessor: (params) => processor.filterProcessor(params.filter, params.input, params.ds),
+    transformer: (params) =>
+      processor.transformer(params.input, params.ds, params.api, params.assets).then((res) => [res]),
+  };
+}
 
 class DsPluginSandbox<P> extends Sandbox {
   constructor(option: Omit<SandboxOption, 'store'>, nodeConfig: NodeConfig) {
@@ -28,17 +99,51 @@ class DsPluginSandbox<P> extends Sandbox {
   }
 }
 
-export abstract class BaseDsProcessorService<
+export function getDsProcessor<
+  P,
   DS extends BaseDataSource = BaseDataSource,
   CDS extends DS & BaseCustomDataSource = DS & BaseCustomDataSource,
-  P extends DsProcessor<CDS> = DsProcessor<CDS>
+>(
+  ds: CDS,
+  isCustomDs: (ds: any) => boolean,
+  processorCache: Record<string, P>,
+  root: string,
+  chainId: string,
+  nodeConfig: NodeConfig
+): P {
+  if (!isCustomDs(ds)) {
+    throw new Error(`data source is not a custom data source`);
+  }
+  if (!processorCache[ds.processor.file]) {
+    const sandbox = new DsPluginSandbox<P>(
+      {
+        root: root,
+        entry: ds.processor.file,
+        chainId: chainId,
+      },
+      nodeConfig
+    );
+    try {
+      processorCache[ds.processor.file] = sandbox.getDsPlugin();
+    } catch (e: any) {
+      logger.error(e, `not supported ds @${ds.kind}`);
+      throw e;
+    }
+  }
+  return processorCache[ds.processor.file] as unknown as P;
+}
+
+@Injectable()
+export class DsProcessorService<
+  DS extends BaseDataSource = BaseDataSource,
+  CDS extends DS & BaseCustomDataSource = DS & BaseCustomDataSource,
+  P extends DsProcessor<CDS> = DsProcessor<CDS>,
 > {
   private processorCache: Record<string, P> = {};
 
-  protected abstract isCustomDs(ds: DS): ds is CDS;
-
   constructor(
     @Inject('ISubqueryProject') private readonly project: ISubqueryProject<IProjectNetworkConfig, DS>,
+    @Inject('IBlockchainService') private blockchainService: IBlockchainService<DS, CDS>,
     private readonly nodeConfig: NodeConfig
   ) {}
 
@@ -64,11 +169,11 @@ export abstract class BaseDsProcessorService<
   }
 
   async validateProjectCustomDatasources(dataSources: DS[]): Promise<void> {
-    await this.validateCustomDs(dataSources.filter((ds) => this.isCustomDs(ds)) as unknown as CDS[]);
+    await this.validateCustomDs(dataSources.filter((ds) => this.blockchainService.isCustomDs(ds)) as unknown as CDS[]);
   }
 
   getDsProcessor(ds: CDS): P {
-    if (!this.isCustomDs(ds)) {
+    if (!this.blockchainService.isCustomDs(ds)) {
       throw new Error(`data source is not a custom data source`);
     }
     if (!this.processorCache[ds.processor.file]) {
@@ -92,7 +197,7 @@ export abstract class BaseDsProcessorService<
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async getAssets(ds: CDS): Promise<Record<string, string>> {
-    if (!this.isCustomDs(ds)) {
+    if (!this.blockchainService.isCustomDs(ds)) {
       throw new Error(`data source is not a custom data source`);
     }
 

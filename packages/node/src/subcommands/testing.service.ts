@@ -1,30 +1,43 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ApiPromise } from '@polkadot/api';
 import {
   NodeConfig,
   TestingService as BaseTestingService,
   NestLogger,
   TestRunner,
-  SubqlProjectDs,
+  ProjectService,
+  DbModule,
 } from '@subql/node-core';
 import { SubstrateDatasource } from '@subql/types';
+import { ConfigureModule } from '../configure/configure.module';
 import { SubqueryProject } from '../configure/SubqueryProject';
-import { ApiService } from '../indexer/api.service';
-import { IndexerManager } from '../indexer/indexer.manager';
-import { ProjectService } from '../indexer/project.service';
 import { ApiAt, BlockContent, LightBlockContent } from '../indexer/types';
-import { TestingModule } from './testing.module';
+import { TestingFeatureModule } from './testing.module';
+
+@Module({
+  imports: [
+    DbModule.forRoot(),
+    ConfigureModule.register(),
+    EventEmitterModule.forRoot(),
+    ScheduleModule.forRoot(),
+    TestingFeatureModule,
+  ],
+  controllers: [],
+})
+export class TestingModule {}
 
 @Injectable()
 export class TestingService extends BaseTestingService<
   ApiPromise,
   ApiAt,
   BlockContent | LightBlockContent,
-  SubqlProjectDs<SubstrateDatasource>
+  SubstrateDatasource
 > {
   constructor(
     nodeConfig: NodeConfig,
@@ -36,12 +49,7 @@ export class TestingService extends BaseTestingService<
   async getTestRunner(): Promise<
     [
       close: () => Promise<void>,
-      runner: TestRunner<
-        ApiPromise,
-        ApiAt,
-        BlockContent,
-        SubqlProjectDs<SubstrateDatasource>
-      >,
+      runner: TestRunner<ApiPromise, ApiAt, BlockContent, SubstrateDatasource>,
     ]
   > {
     const testContext = await NestFactory.createApplicationContext(
@@ -54,30 +62,9 @@ export class TestingService extends BaseTestingService<
     await testContext.init();
 
     const projectService: ProjectService = testContext.get('IProjectService');
-    const apiService = testContext.get(ApiService);
 
-    // Initialise async services, we do this here rather than in factories, so we can capture one off events
-    await apiService.init();
     await projectService.init();
 
     return [testContext.close.bind(testContext), testContext.get(TestRunner)];
-  }
-
-  async indexBlock(
-    block: BlockContent | LightBlockContent,
-    handler: string,
-    indexerManager: IndexerManager,
-    apiService: ApiService,
-  ): Promise<void> {
-    const runtimeVersion =
-      await apiService.unsafeApi.rpc.state.getRuntimeVersion(
-        block.block.block.header.hash,
-      );
-
-    await indexerManager.indexBlock(
-      block,
-      this.getDsWithHandler(handler),
-      runtimeVersion,
-    );
   }
 }

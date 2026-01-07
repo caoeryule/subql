@@ -1,6 +1,6 @@
 {
   "name": "@subql/types",
-  "version": "3.3.0",
+  "version": "3.15.0",
   "description": "",
   "homepage": "https://github.com/subquery/subql",
   "repository": "github:subquery/subql",
@@ -14,15 +14,25 @@
   "license": "GPL-3.0",
   "files": [
     "src/global.d.ts",
-    "/dist"
+    "/dist",
+    "!/dist/**/*.spec.js",
+    "!/dist/**/*.spec.d.ts",
+    "!/dist/**/*.spec.js.map",
+    "!/dist/**/*.test.js",
+    "!/dist/**/*.test.d.ts",
+    "!/dist/**/*.test.js.map",
+    "package.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "dependencies": {
-    "@subql/types-core": "workspace:*"
+    "@subql/types-core": "workspace:~"
   },
   "peerDependencies": {
-    "@polkadot/api": "^10"
+    "@polkadot/api": "^16"
   },
   "devDependencies": {
-    "@polkadot/api": "^10"
+    "@polkadot/api": "^16.4.7"
   }
 }

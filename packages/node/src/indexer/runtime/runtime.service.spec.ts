@@ -1,13 +1,14 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
+import assert from 'assert';
 import { BlockHash, RuntimeVersion } from '@polkadot/types/interfaces';
 import { ApiService } from '../api.service';
 import {
-  DictionaryService,
   SpecVersion,
   SpecVersionDictionary,
-} from '../dictionary.service';
+  SubstrateDictionaryService,
+} from '../dictionary';
 import { SPEC_VERSION_BLOCK_GAP } from './base-runtime.service';
 import { RuntimeService } from './runtimeService';
 
@@ -41,13 +42,14 @@ const getApiService = (): ApiService =>
             // Treat 0 as 1 for parent hash of block 1
             const blockNum = Math.max(parseInt(blockHash), 1);
 
-            const { id } = specVersions.find(
+            const specVersion = specVersions.find(
               (v) => v.start <= blockNum && (!v.end || v.end >= blockNum),
             );
+            assert(specVersion, `Spec version not found for block ${blockNum}`);
 
             return Promise.resolve({
               specVersion: {
-                toNumber: () => parseInt(id),
+                toNumber: () => parseInt(specVersion.id, 10),
               },
             } as RuntimeVersion);
           },
@@ -55,29 +57,37 @@ const getApiService = (): ApiService =>
       },
       getBlockRegistry: (hash: string) => Promise.resolve(),
     },
-  } as any);
+  }) as any;
 
-const getDictionaryService = (): DictionaryService =>
+const getDictionaryService = (): SubstrateDictionaryService =>
   ({
-    useDictionary: false,
+    useDictionary: (height: number) => {
+      return false;
+    },
     getSpecVersions: (): Promise<SpecVersion[]> => {
       return Promise.resolve(specVersions);
     },
     parseSpecVersions: (raw: SpecVersionDictionary): SpecVersion[] => {
       throw new Error('Not implemented');
     },
-  } as any);
+    initDictionariesV1: () => {
+      //TODO
+    },
+    initDictionariesV2: () => {
+      //TODO
+    },
+  }) as any;
 
 describe('Runtime service', () => {
   let runtimeService: RuntimeService;
-  let dictionaryService: DictionaryService;
+  let dictionaryService: SubstrateDictionaryService;
   let apiService: ApiService;
 
   beforeEach(() => {
     dictionaryService = getDictionaryService();
     apiService = getApiService();
 
-    runtimeService = new RuntimeService(apiService, dictionaryService);
+    runtimeService = new RuntimeService(apiService);
   });
 
   it('doesnt refetch metadata when spec version doesnt change', async () => {
@@ -104,9 +114,10 @@ describe('Runtime service', () => {
   });
 
   it('use dictionary and specVersionMap to get block specVersion', async () => {
-    (dictionaryService as any).useDictionary = true;
+    (dictionaryService as any).useDictionary = (height: number) => true;
 
-    // This is called in fetchService.preLoopHook
+    // This is called in init.ts to bootsrap the application
+    await runtimeService.init(0, 29233, dictionaryService);
     await runtimeService.syncDictionarySpecVersions();
 
     const metaSpy = jest.spyOn(apiService.api.rpc.state, 'getRuntimeVersion');
@@ -117,7 +128,8 @@ describe('Runtime service', () => {
   });
 
   it('getSpecVersion will fetch the spec version if its not in the map', async () => {
-    (dictionaryService as any).useDictionary = true;
+    (dictionaryService as any).useDictionary = (height: number) => true;
+    (runtimeService as any).dictionaryService = dictionaryService;
 
     const height = 3967204;
 
@@ -130,22 +142,4 @@ describe('Runtime service', () => {
     expect(apiSpy).toHaveBeenCalled();
     expect(dictSpy).toHaveBeenCalled();
   });
-
-  // OLD tests from fetch.service, unsure how to implements
-  // it('use api to get block specVersion when blockHeight out of specVersionMap', () => {
-
-  // });
-
-  // it('only fetch SpecVersion from dictionary once', () => {
-
-  // });
-
-  // it('update specVersionMap once when specVersion map is out', () => {
-
-  // });
-
-  // // Was skipped previously
-  // it('prefetch meta for different specVersion range', () => {
-
-  // });
 });

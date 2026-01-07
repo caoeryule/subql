@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import axios, {AxiosInstance} from 'axios';
@@ -24,6 +24,7 @@ export class HttpJsonRpcClient {
       params,
     });
     if ((res.data as ResponseError).error) {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw (res.data as ResponseError).error;
     }
     return (res.data as ResponseSuccess<T>).result;

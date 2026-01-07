@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import { INestApplication } from '@nestjs/common';
@@ -12,6 +12,7 @@ import {
   NodeConfig,
 } from '@subql/node-core';
 import { SubstrateBlock } from '@subql/types';
+import { IEndpointConfig } from '@subql/types-core';
 import { GraphQLSchema } from 'graphql';
 import { SubqueryProject } from '../configure/SubqueryProject';
 import { wrapBlock } from '../utils/substrate';
@@ -23,29 +24,27 @@ const HTTP_ENDPOINT = 'https://kusama.api.onfinality.io/public';
 const TEST_BLOCKHASH =
   '0x70070f6c1ad5b9ce3d0a09e94086e22b8d4f08a18491183de96614706bf59600'; // kusama #6721189
 
-const TEST_BLOCKNUMBER = 6721189; // kusama
-
 function testSubqueryProject(
-  endpoint: string[],
+  endpoint: Record<string, IEndpointConfig>,
   chainId: string,
 ): SubqueryProject {
-  return new SubqueryProject(
-    'test',
-    './',
-    {
+  return {
+    id: 'test',
+    root: './',
+    network: {
       endpoint,
       dictionary: `https://api.subquery.network/sq/subquery/dictionary-polkadot`,
       chainId: chainId,
     },
-    [],
-    new GraphQLSchema({}),
-    [],
-    {
+    dataSources: [],
+    schema: new GraphQLSchema({}),
+    templates: [],
+    chainTypes: {
       types: {
         TestType: 'u32',
       },
     },
-  );
+  } as unknown as SubqueryProject;
 }
 
 jest.setTimeout(90000);
@@ -66,23 +65,30 @@ describe('ApiService', () => {
         ConnectionPoolService,
         {
           provide: 'ISubqueryProject',
-          useFactory: () => testSubqueryProject([endpoint], chainId),
+          useFactory: () => testSubqueryProject({ [endpoint]: {} }, chainId),
         },
         {
           provide: NodeConfig,
           useFactory: () => ({}),
         },
         EventEmitter2,
-        ApiService,
+        {
+          provide: ApiService,
+          useFactory: ApiService.init,
+          inject: [
+            'ISubqueryProject',
+            ConnectionPoolService,
+            EventEmitter2,
+            NodeConfig,
+          ],
+        },
       ],
       imports: [EventEmitterModule.forRoot()],
     }).compile();
 
     app = module.createNestApplication();
     await app.init();
-    const apiService = app.get(ApiService);
-    await apiService.init();
-    return apiService;
+    return app.get(ApiService);
   };
 
   it('can instantiate api', async () => {
@@ -90,7 +96,6 @@ describe('ApiService', () => {
     const api = apiService.api;
 
     const apiAt = await api.at(TEST_BLOCKHASH);
-    apiAt.registry;
     expect(api.registry.getDefinition('TestType')).toEqual('u32');
     // workaround for ending the test immediately (before return of subscribeRuntimeVersion)
     // will cause an unhandled promise rejection and affect the result of next test.
@@ -103,7 +108,7 @@ describe('ApiService', () => {
     const blockhash = await api.rpc.chain.getBlockHash(2);
     const validators = await api.query.session.validators.at(blockhash);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 1) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 1 } as unknown as RuntimeVersion;
     const patchedApi = await apiService.getPatchedApi(
       mockBlock.block.header,
@@ -113,7 +118,9 @@ describe('ApiService', () => {
       patchedApi.query.session.validators(),
       api.query.session.validators(),
     ]);
-    expect(validators).toMatchObject(patchedValidators);
+    expect(validators.toJSON()).toMatchObject(
+      patchedValidators.toJSON() as any,
+    );
     expect(patchedValidators).not.toMatchObject(currentValidators);
   });
 
@@ -122,7 +129,7 @@ describe('ApiService', () => {
     const api = apiService.api;
     const blockhash = await api.rpc.chain.getBlockHash(6721189);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 13) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 13 } as unknown as RuntimeVersion;
     const patchedApi = await apiService.getPatchedApi(
       mockBlock.block.header,
@@ -149,7 +156,7 @@ describe('ApiService', () => {
     const api = apiService.api;
     const blockhash = await api.rpc.chain.getBlockHash(6721195);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 9090) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 9090 } as unknown as RuntimeVersion;
     // step 1, get early block, original polkadot api query result
     const earlyBlockhash = await api.rpc.chain.getBlockHash(5661443);
@@ -159,9 +166,8 @@ describe('ApiService', () => {
       mockBlock.block.header,
       runtimeVersion,
     );
-    const patchedResult = await patchedApi.rpc.state.getRuntimeVersion(
-      earlyBlockhash,
-    );
+    const patchedResult =
+      await patchedApi.rpc.state.getRuntimeVersion(earlyBlockhash);
     expect(apiResults).toEqual(patchedResult);
     // patchedApi without input blockHash, will return runtimeVersion at 6721195
     const patchedResult2 = await patchedApi.rpc.state.getRuntimeVersion();
@@ -179,7 +185,7 @@ describe('ApiService', () => {
     const api = apiService.api;
     const blockhash = await api.rpc.chain.getBlockHash(5661443);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 9050) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 9050 } as unknown as RuntimeVersion;
     // step 1, get future block, original polkadot api query result
     const futureBlockhash = await api.rpc.chain.getBlockHash(6721195);
@@ -195,13 +201,15 @@ describe('ApiService', () => {
     );
   });
 
+  // const change in new metadata, need to find another test example
   it.skip('api consts is swapped to the specified block', async () => {
     const apiService = await prepareApiService();
     const api = apiService.api;
     // upgrade at 4401242 that maxNominatorRewardedPerValidator changed from 256 to 128
     let blockhash: BlockHash;
-    const currentMaxNRPV =
-      api.consts.staking.maxNominatorRewardedPerValidator.toNumber();
+    const currentMaxNRPV = Number(
+      api.consts.staking.maxNominatorRewardedPerValidator,
+    );
     if (currentMaxNRPV === 128) {
       blockhash = await api.rpc.chain.getBlockHash(4401242);
     } else {
@@ -209,14 +217,14 @@ describe('ApiService', () => {
     }
 
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 28) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 28 } as unknown as RuntimeVersion;
     const patchedApi = await apiService.getPatchedApi(
       mockBlock.block.header,
       runtimeVersion,
     );
     expect(
-      patchedApi.consts.staking.maxNominatorRewardedPerValidator.toNumber(),
+      Number(patchedApi.consts.staking.maxNominatorRewardedPerValidator),
     ).not.toEqual(currentMaxNRPV);
   });
 
@@ -383,7 +391,7 @@ describe('ApiService', () => {
     const api = apiService.api;
     const blockhash = await api.rpc.chain.getBlockHash(1);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 1) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 1 } as unknown as RuntimeVersion;
 
     const patchedApi = await apiService.getPatchedApi(
@@ -404,7 +412,7 @@ describe('ApiService', () => {
     const blockNumber = 1545235;
     const blockhash = await api.rpc.chain.getBlockHash(blockNumber);
     const block = await api.rpc.chain.getBlock(blockhash);
-    const mockBlock = wrapBlock(block, []) as unknown as SubstrateBlock;
+    const mockBlock = wrapBlock(block, [], 1103) as unknown as SubstrateBlock;
     const runtimeVersion = { specVersion: 1103 } as unknown as RuntimeVersion;
 
     const patchedApi = await apiService.getPatchedApi(
@@ -432,6 +440,79 @@ describe('ApiService', () => {
       ),
     ).rejects.toThrow(
       'input block 1645235 ahead of current block 1545235 is not supported',
+    );
+  });
+});
+
+describe('Load chain type hasher', () => {
+  let app: INestApplication;
+
+  afterEach(async () => {
+    return app?.close();
+  });
+
+  const prepareApiService = async (
+    endpoint = { 'wss://hyperbridge-paseo-rpc.blockops.network': {} },
+    chainId = '0x5388faf792c5232566d21493929b32c1f20a9c2b03e95615eefec2aa26d64b73',
+  ): Promise<ApiService> => {
+    const module = await Test.createTestingModule({
+      providers: [
+        ConnectionPoolStateManager,
+        ConnectionPoolService,
+        {
+          provide: 'ISubqueryProject',
+          useFactory: () => ({
+            id: 'test',
+            root: './',
+            network: {
+              endpoint,
+              chainId: chainId,
+            },
+            dataSources: [],
+            schema: new GraphQLSchema({}),
+            templates: [],
+            chainTypes: {
+              typesBundle: {
+                spec: {
+                  gargantua: {
+                    // @ts-ignore, we allow it to be string here
+                    hasher: 'keccakAsU8a',
+                    types: [{ minmax: [0, undefined], types: {} }],
+                  },
+                },
+              },
+            },
+          }),
+        },
+        {
+          provide: NodeConfig,
+          useFactory: () => ({}),
+        },
+        EventEmitter2,
+        {
+          provide: ApiService,
+          useFactory: ApiService.init,
+          inject: [
+            'ISubqueryProject',
+            ConnectionPoolService,
+            EventEmitter2,
+            NodeConfig,
+          ],
+        },
+      ],
+      imports: [EventEmitterModule.forRoot()],
+    }).compile();
+
+    app = module.createNestApplication();
+    await app.init();
+    return app.get(ApiService);
+  };
+
+  it('should use new hasher function, types hasher string should be replaced with function', async () => {
+    const apiService = await prepareApiService();
+    const api = apiService.api;
+    expect(typeof (api as any)._options.typesBundle.spec.gargantua.hasher).toBe(
+      'function',
     );
   });
 });

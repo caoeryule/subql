@@ -6,6 +6,161 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.8.2] - 2025-11-20
+### Changed
+- Update js-yaml (#2960)
+
+## [5.8.1] - 2025-11-05
+### Changed
+- Update axios (#2952)
+
+## [5.8.0] - 2025-10-15
+### Changed
+- Minor improvements and fixes from upgrading to eslint 9 with stricter settings (#2929)
+
+## [5.7.6] - 2025-09-16
+### Changed
+- Improved error message relating to IPFS (#2876)
+
+## [5.7.5] - 2025-08-29
+### Changed
+- Fixed typos (#2895)
+
+## [5.7.4] - 2025-08-25
+### Changed
+- Bump axios to 1.11.0 (#2881)
+
+## [5.7.3] - 2025-07-24
+### Changed
+- Bump form-data dependency (#2858)
+
+## [5.7.2] - 2025-07-17
+### Changed
+- Workspace dependencies now match to patch versions rather than exact (#2855)
+
+## [5.7.1] - 2025-07-14
+### Fixed
+- Lock down class-validator dependency that had a breaking change in a patch release (#2844)
+
+## [5.7.0] - 2025-07-01
+### Removed
+- Test files and artifacts from published package (#2838)
+
+## [5.6.1] - 2025-06-25
+### Changed
+- Update reflect-metadata dependency (#2826)
+
+## [5.6.0] - 2025-04-30
+### Changed
+- Update axios dependency
+
+## [5.5.0] - 2025-04-17
+### Added
+- Support for Solana (#2745)
+
+## [5.4.0] - 2025-02-19
+### Changed
+- Update polkadot api to 15 (#2680)
+
+## [5.3.1] - 2025-02-04
+### Changed
+- Update copyright header to 2025
+
+## [5.3.0] - 2025-01-28
+### Added
+- Add starknet to network family constants
+
+## [5.2.2] - 2024-12-11
+### Fixed
+- Missing form-data dependency (#2622)
+
+## [5.2.1] - 2024-11-25
+### Changed
+- Update polkadot/api library to 14 version
+
+## [5.2.0] - 2024-11-22
+### Fixed
+- Removed imports of `@polkadot/util` without it being a dependency (#2592)
+
+### Removed
+- Support for cockroach DB (#2584)
+
+## [5.1.4] - 2024-10-23
+### Fixed
+- Bump version `@subql/types-core`
+
+## [5.1.3] - 2024-09-25
+### Added
+- `Runner.query` support `@subql/query-subgraph` option
+
+## [5.1.2] - 2024-09-09
+### Changed
+- Expose CID on IPFS Reader (#2551)
+
+## [5.1.1] - 2024-08-14
+### Added
+- Update polkadot/api library
+
+## [5.1.0] - 2024-08-05
+### Removed
+- `findAvailablePort` function, it now lives in `@subql/utils` (#2518)
+
+### Changed
+- Update dependencies (#2518)
+
+## [5.0.0] - 2024-08-01
+### Added
+- New type for endpoint to allow specifying endpoint options (#2511)
+
+## [4.1.1] - 2024-07-25
+### Changed
+- Bump version with `@subql/utils`
+
+## [4.1.0] - 2024-07-11
+### Added
+- Add `IPFSHTTPClientLite` to replace original `IPFSHTTPClient` in order to reduce dependencies (#2480)
+
+## [4.0.1] - 2024-07-09
+### Changed
+- Changes to ts build settings (#2475)
+
+## [4.0.0] - 2024-07-01
+### Changed
+- Breaking Change: Bump version with `@subql/types-core`, apply parseFunction type missing asImpl and its deployment (#2466)
+
+## [3.9.0] - 2024-06-21
+### Added
+- Enable ts strict model (#2448)
+- Reader interface method not returning undefined (#2448)
+
+## [3.8.0] - 2024-06-18
+### Changed
+- Deprecated flare SDK (#2428)
+
+## [3.7.0] - 2024-06-05
+### Changed
+- Add default value in model class to follow ES2022 rule
+
+## [3.6.0] - 2024-05-22
+### Changed
+- Improve error message when project manifest is invalid (#2408)
+
+## [3.5.1] - 2024-04-24
+### Added
+- Default .env file names (#2345)
+
+## [3.5.0] - 2024-03-28
+### Changed
+- Dictionary model changed (#2257)
+
+## [3.4.1] - 2024-02-23
+### Changed
+- Bump axios from 0.27.0 to 0.28.0 (#2262)
+
+## [3.4.0] - 2024-02-07
+### Added
+- Update `ParentProject` to use `untilBlock` as and alias for `block` (#2235)
+
 ## [3.3.1] - 2023-12-14
 ### Fixed
 - Rollback version of axios to support commonsjs
@@ -343,7 +498,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - init commit
 
-[Unreleased]: https://github.com/subquery/subql/compare/common/3.3.1...HEAD
+[Unreleased]: https://github.com/subquery/subql/compare/common/5.8.2...HEAD
+[5.8.2]: https://github.com/subquery/subql/compare/common/5.8.1...common/5.8.2
+[5.8.1]: https://github.com/subquery/subql/compare/common/5.8.0...common/5.8.1
+[5.8.0]: https://github.com/subquery/subql/compare/common/5.7.6...common/5.8.0
+[5.7.6]: https://github.com/subquery/subql/compare/common/5.7.5...common/5.7.6
+[5.7.5]: https://github.com/subquery/subql/compare/common/5.7.4...common/5.7.5
+[5.7.4]: https://github.com/subquery/subql/compare/common/5.7.3...common/5.7.4
+[5.7.3]: https://github.com/subquery/subql/compare/common/5.7.2...common/5.7.3
+[5.7.2]: https://github.com/subquery/subql/compare/common/5.7.1...common/5.7.2
+[5.7.1]: https://github.com/subquery/subql/compare/common/5.7.0...common/5.7.1
+[5.7.0]: https://github.com/subquery/subql/compare/common/5.6.1...common/5.7.0
+[5.6.1]: https://github.com/subquery/subql/compare/common/5.6.0...common/5.6.1
+[5.6.0]: https://github.com/subquery/subql/compare/common/5.5.0...common/5.6.0
+[5.5.0]: https://github.com/subquery/subql/compare/common/5.4.0...common/5.5.0
+[5.4.0]: https://github.com/subquery/subql/compare/common/5.3.1...common/5.4.0
+[5.3.1]: https://github.com/subquery/subql/compare/common/5.3.0...common/5.3.1
+[5.3.0]: https://github.com/subquery/subql/compare/common/5.2.2...common/5.3.0
+[5.2.2]: https://github.com/subquery/subql/compare/common/5.2.1...common/5.2.2
+[5.2.1]: https://github.com/subquery/subql/compare/common/5.2.0...common/5.2.1
+[5.2.0]: https://github.com/subquery/subql/compare/common/5.1.4...common/5.2.0
+[5.1.4]: https://github.com/subquery/subql/compare/common/5.1.3...common/5.1.4
+[5.1.3]: https://github.com/subquery/subql/compare/common/5.1.2...common/5.1.3
+[5.1.2]: https://github.com/subquery/subql/compare/common/5.1.1...common/5.1.2
+[5.1.1]: https://github.com/subquery/subql/compare/common/5.1.0...common/5.1.1
+[5.1.0]: https://github.com/subquery/subql/compare/common/5.0.0...common/5.1.0
+[5.0.0]: https://github.com/subquery/subql/compare/common/4.1.1...common/5.0.0
+[4.1.1]: https://github.com/subquery/subql/compare/common/4.1.0...common/4.1.1
+[4.1.0]: https://github.com/subquery/subql/compare/common/4.0.1...common/4.1.0
+[4.0.1]: https://github.com/subquery/subql/compare/common/4.0.0...common/4.0.1
+[4.0.0]: https://github.com/subquery/subql/compare/common/3.9.0...common/4.0.0
+[3.9.0]: https://github.com/subquery/subql/compare/common/3.8.0...common/3.9.0
+[3.8.0]: https://github.com/subquery/subql/compare/common/3.7.0...common/3.8.0
+[3.7.0]: https://github.com/subquery/subql/compare/common/3.6.0...common/3.7.0
+[3.6.0]: https://github.com/subquery/subql/compare/common/3.5.1...common/3.6.0
+[3.5.1]: https://github.com/subquery/subql/compare/common/3.5.0...common/3.5.1
+[3.5.0]: https://github.com/subquery/subql/compare/common/3.4.1...common/3.5.0
+[3.4.1]: https://github.com/subquery/subql/compare/common/3.4.0...common/3.4.1
+[3.4.0]: https://github.com/subquery/subql/compare/common/3.3.1...common/3.4.0
 [3.3.1]: https://github.com/subquery/subql/compare/common/3.3.0...common/3.3.1
 [3.3.0]: https://github.com/subquery/subql/compare/common/3.2.0...common/3.3.0
 [3.2.0]: https://github.com/subquery/subql/compare/common/3.1.3...common/3.2.0

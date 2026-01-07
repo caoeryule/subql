@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 import { ApiPromise, WsProvider } from '@polkadot/api';
@@ -14,7 +14,9 @@ import {
   RateLimitError,
   TimeoutError,
   IApiConnectionSpecific,
+  IBlock,
 } from '@subql/node-core';
+import { IEndpointConfig } from '@subql/types-core';
 import * as SubstrateUtil from '../utils/substrate';
 import { ApiAt, BlockContent, LightBlockContent } from './types';
 import { createCachedProvider } from './x-provider/cachedProvider';
@@ -37,15 +39,13 @@ export class ApiPromiseConnection
     IApiConnectionSpecific<
       ApiPromise,
       ApiAt,
-      BlockContent[] | LightBlockContent[]
+      IBlock<BlockContent>[] | IBlock<LightBlockContent>[]
     >
 {
   readonly networkMeta: NetworkMetadataPayload;
 
-  constructor(
+  private constructor(
     public unsafeApi: ApiPromise,
-    private apiOptions: ApiOptions,
-    private endpoint: string,
     private fetchBlocksBatches: GetFetchFunc,
   ) {
     this.networkMeta = {
@@ -58,13 +58,15 @@ export class ApiPromiseConnection
   static async create(
     endpoint: string,
     fetchBlocksBatches: GetFetchFunc,
-    args: { chainTypes: RegisteredTypes },
+    args: { chainTypes?: RegisteredTypes },
+    config: IEndpointConfig,
   ): Promise<ApiPromiseConnection> {
     let provider: ProviderInterface;
     let throwOnConnect = false;
 
     const headers = {
       'User-Agent': `SubQuery-Node ${packageVersion}`,
+      ...config.headers,
     };
 
     if (endpoint.startsWith('ws')) {
@@ -74,6 +76,8 @@ export class ApiPromiseConnection
     } else if (endpoint.startsWith('http')) {
       provider = createCachedProvider(new HttpProvider(endpoint, headers));
       throwOnConnect = true;
+    } else {
+      throw new Error(`Invalid endpoint: ${endpoint}`);
     }
 
     const apiOption = {
@@ -83,12 +87,7 @@ export class ApiPromiseConnection
       ...args.chainTypes,
     };
     const api = await ApiPromise.create(apiOption);
-    return new ApiPromiseConnection(
-      api,
-      apiOption,
-      endpoint,
-      fetchBlocksBatches,
-    );
+    return new ApiPromiseConnection(api, fetchBlocksBatches);
   }
 
   safeApi(height: number): ApiAt {
@@ -98,7 +97,7 @@ export class ApiPromiseConnection
   async fetchBlocks(
     heights: number[],
     overallSpecVer?: number,
-  ): Promise<BlockContent[] | LightBlockContent[]> {
+  ): Promise<IBlock<BlockContent>[] | IBlock<LightBlockContent>[]> {
     const blocks = await this.fetchBlocksBatches()(
       this.unsafeApi,
       heights,
@@ -125,6 +124,16 @@ export class ApiPromiseConnection
 
   async apiDisconnect(): Promise<void> {
     await this.unsafeApi.disconnect();
+  }
+
+  async updateChainTypes(chainTypes: RegisteredTypes): Promise<void> {
+    // Typeof Decorate<'promise' | 'rxjs'>, but we need to access this private method
+    const currentApiOptions = (this.unsafeApi as any)._options as ApiOptions;
+    const apiOption = {
+      ...currentApiOptions,
+      ...chainTypes,
+    };
+    this.unsafeApi = await ApiPromise.create(apiOption);
   }
 
   handleError = ApiPromiseConnection.handleError;

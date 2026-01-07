@@ -1,4 +1,4 @@
-// Copyright 2020-2023 SubQuery Pte Ltd authors & contributors
+// Copyright 2020-2025 SubQuery Pte Ltd authors & contributors
 // SPDX-License-Identifier: GPL-3.0
 
 /* eslint-disable */
@@ -41,6 +41,7 @@ import PgConnectionTotalCount from '@subql/x-graphile-build-pg/node8plus/plugins
 import PgSimplifyInflectorPlugin from '@graphile-contrib/pg-simplify-inflector';
 import PgManyToManyPlugin from '@graphile-contrib/pg-many-to-many';
 import ConnectionFilterPlugin from 'postgraphile-plugin-connection-filter';
+import PgOrderByRelatedPlugin from '@graphile-contrib/pg-order-by-related';
 
 // custom plugins
 import PgConnectionArgFirstLastBeforeAfter from './PgConnectionArgFirstLastBeforeAfter';
@@ -49,11 +50,11 @@ import {GetMetadataPlugin} from './GetMetadataPlugin';
 import {smartTagsPlugin} from './smartTagsPlugin';
 import {makeAddInflectorsPlugin} from 'graphile-utils';
 import PgAggregationPlugin from './PgAggregationPlugin';
-import {PgBlockHeightPlugin} from './PgBlockHeightPlugin';
 import {PgRowByVirtualIdPlugin} from './PgRowByVirtualIdPlugin';
 import {PgDistinctPlugin} from './PgDistinctPlugin';
-import {makeAddPgTableOrderByPlugin, orderByAscDesc} from 'postgraphile';
 import PgConnectionArgOrderBy from './PgOrderByUnique';
+import historicalPlugins from './historical';
+import {PgSearchPlugin} from './PgSearchPlugin';
 
 /* eslint-enable */
 
@@ -102,6 +103,7 @@ export const pgDefaultPlugins = [
 const plugins = [
   ...defaultPlugins,
   ...pgDefaultPlugins,
+  ...historicalPlugins,
   PgConnectionArgOrderBy,
   PgSimplifyInflectorPlugin,
   PgManyToManyPlugin,
@@ -109,9 +111,10 @@ const plugins = [
   smartTagsPlugin,
   GetMetadataPlugin,
   PgAggregationPlugin,
-  PgBlockHeightPlugin,
   PgRowByVirtualIdPlugin,
   PgDistinctPlugin,
+  PgSearchPlugin,
+  PgOrderByRelatedPlugin,
   makeAddInflectorsPlugin((inflectors) => {
     const {constantCase: oldConstantCase} = inflectors;
     const enumValues = new Set();
